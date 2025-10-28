@@ -5,9 +5,15 @@
   "scripts": {
     "frontend": "cd frontend && npm run dev",
     "frontend:build": "cd frontend && npm run build",
-    "frontend:preview": "cd frontend && npm run preview"
+    "frontend:preview": "cd frontend && npm run preview",
+    "backend": "cd backend && source venv/bin/activate && python -m uvicorn main:app --reload",
+    "backend:dev": "cd backend && source venv/bin/activate && python -m uvicorn main:app --reload --host 0.0.0.0 --port 8000",
+    "dev": "concurrently \"npm run frontend\" \"npm run backend:dev\""
   },
   "keywords": [],
   "author": "",
-  "license": "ISC"
+  "license": "ISC",
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
 }

@@ -162,7 +162,7 @@ export function AgentBuilder() {
     );
   };
 
-  const handleGenerateAgent = () => {
+  const handleGenerateAgent = async () => {
     if (!agentName.trim()) {
       toast({
         title: "Agent name required",
@@ -173,27 +173,49 @@ export function AgentBuilder() {
     }
 
     const config = {
-      agentName,
-      agentType,
-      llmProvider,
-      llmModel,
-      apiKey,
+      name: agentName,
+      agent_type: agentType,
+      llm_provider: llmProvider,
+      llm_model: llmModel,
+      api_key: apiKey,
       temperature: temperature[0],
-      systemPrompt,
+      system_prompt: systemPrompt,
       tools: selectedTools,
-      maxIterations: parseInt(maxIterations),
-      memoryType,
-      streamingEnabled,
-      humanInLoop,
-      recursionLimit: parseInt(recursionLimit),
+      max_iterations: parseInt(maxIterations),
+      memory_type: memoryType,
+      streaming_enabled: streamingEnabled,
+      human_in_loop: humanInLoop,
+      recursion_limit: parseInt(recursionLimit),
     };
 
-    console.log("Generated LangGraph Agent Configuration:", config);
-    
-    toast({
-      title: "Agent Generated! 🎉",
-      description: `${agentName} configured with ${agentType} architecture`,
-    });
+    try {
+      const response = await fetch('http://localhost:8000/api/v1/agents', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(config),
+      });
+
+      if (response.ok) {
+        const agent = await response.json();
+        console.log("Agent created successfully:", agent);
+        toast({
+          title: "Agent Created! 🎉",
+          description: `${agentName} configured with ${agentType} architecture and ID: ${agent.agent_id}`,
+        });
+      } else {
+        const error = await response.json();
+        throw new Error(error.detail || 'Failed to create agent');
+      }
+    } catch (error) {
+      console.error("Error creating agent:", error);
+      toast({
+        title: "Error Creating Agent",
+        description: error.message || "Failed to create agent. Please try again.",
+        variant: "destructive",
+      });
+    }
   };
 
   return (
