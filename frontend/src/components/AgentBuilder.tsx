@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -8,7 +9,7 @@ import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Sparkles, Cpu, Database, GitBranch, Settings2, Thermometer, Hash, Layers, Box, FileText, Key } from "lucide-react";
+import { Sparkles, Cpu, Database, GitBranch, Settings2, Thermometer, Hash, Layers, Box, FileText, Key, MessageSquare } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import { ThemeToggle } from "@/components/ThemeToggle";
 
@@ -135,6 +136,7 @@ const AVAILABLE_TOOLS = [
 ];
 
 export function AgentBuilder() {
+  const navigate = useNavigate();
   const [agentName, setAgentName] = useState("");
   const [agentType, setAgentType] = useState("react");
   const [llmProvider, setLlmProvider] = useState("anthropic");
@@ -229,6 +231,10 @@ export function AgentBuilder() {
           </div>
           <div className="flex items-center gap-2">
             <ThemeToggle />
+            <Button variant="outline" size="default" onClick={() => navigate('/chat')}>
+              <MessageSquare className="w-4 h-4 mr-2" />
+              Chat with Agents
+            </Button>
             <Button variant="default" size="default" onClick={handleGenerateAgent}>
               <Sparkles className="w-4 h-4 mr-2" />
               Generate Agent
