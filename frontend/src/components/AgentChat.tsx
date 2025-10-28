@@ -14,11 +14,21 @@ interface Message {
 }
 
 interface Agent {
-  id: number;
   agent_id: string;
   name: string;
   agent_type: string;
+  llm_provider: string;
   llm_model: string;
+  temperature: number;
+  system_prompt: string;
+  tools: string[];
+  max_iterations: number;
+  memory_type: string;
+  streaming_enabled: boolean;
+  human_in_loop: boolean;
+  recursion_limit: number;
+  created_at: string;
+  updated_at: string;
 }
 
 export function AgentChat() {

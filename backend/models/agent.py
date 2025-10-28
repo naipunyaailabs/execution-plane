@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Text, Boolean, DateTime, JSON
+wfrom sqlalchemy import Column, Integer, String, Text, Boolean, DateTime, JSON
 from sqlalchemy.sql import func
 from core.database import Base
 
@@ -19,5 +19,6 @@ class Agent(Base):
     streaming_enabled = Column(Boolean, default=True)
     human_in_loop = Column(Boolean, default=False)
     recursion_limit = Column(Integer)
+    api_key_encrypted = Column(String)  # Encrypted user API key
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())

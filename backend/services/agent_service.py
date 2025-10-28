@@ -3,9 +3,17 @@ import json
 from typing import List, Dict, Any, Optional
 from sqlalchemy.orm import Session
 from langgraph.graph import StateGraph, END
+from langgraph.prebuilt import create_react_agent
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain_core.tools import tool
+from langchain_core.language_models import FakeListLLM
 from langchain_openai import ChatOpenAI
 from langchain_anthropic import ChatAnthropic
+from langchain_groq import ChatGroq
+import hashlib
+import base64
+from cryptography.fernet import Fernet
 
 from models.agent import Agent as AgentModel
 from schemas.agent import AgentCreate, AgentInDB
@@ -14,10 +22,34 @@ from core.config import settings
 class AgentService:
     def __init__(self, db: Session):
         self.db = db
+        # Generate encryption key from settings or create a default one
+        # In production, this should be stored securely
+        self._encryption_key = self._get_or_create_encryption_key()
+    
+    def _get_or_create_encryption_key(self) -> bytes:
+        # In production, this should come from a secure environment variable
+        key_source = settings.SECRET_KEY.encode() if hasattr(settings, 'SECRET_KEY') and settings.SECRET_KEY else b'mech_agent_default_secret_key_32bytes!'
+        # Ensure the key is 32 bytes for Fernet
+        return base64.urlsafe_b64encode(hashlib.sha256(key_source).digest())
+    
+    def _encrypt_api_key(self, api_key: str) -> str:
+        """Encrypt API key for storage"""
+        f = Fernet(self._encryption_key)
+        return f.encrypt(api_key.encode()).decode()
+    
+    def _decrypt_api_key(self, encrypted_api_key: str) -> str:
+        """Decrypt API key for use"""
+        f = Fernet(self._encryption_key)
+        return f.decrypt(encrypted_api_key.encode()).decode()
     
     async def create_agent(self, agent_data: AgentCreate) -> AgentInDB:
         """Create a new agent in the database"""
         agent_id = str(uuid.uuid4())
+        
+        # Encrypt the API key before storing
+        encrypted_api_key = None
+        if agent_data.api_key:
+            encrypted_api_key = self._encrypt_api_key(agent_data.api_key)
         
         db_agent = AgentModel(
             agent_id=agent_id,
@@ -32,7 +64,8 @@ class AgentService:
             memory_type=agent_data.memory_type,
             streaming_enabled=agent_data.streaming_enabled,
             human_in_loop=agent_data.human_in_loop,
-            recursion_limit=agent_data.recursion_limit
+            recursion_limit=agent_data.recursion_limit,
+            api_key_encrypted=encrypted_api_key
         )
         
         self.db.add(db_agent)
@@ -48,6 +81,11 @@ class AgentService:
         if db_agent:
             return AgentInDB.model_validate(db_agent)
         return None
+
+    async def get_agents(self) -> List[AgentInDB]:
+        """Retrieve all agents"""
+        db_agents = self.db.query(AgentModel).all()
+        return [AgentInDB.model_validate(agent) for agent in db_agents]
     
     async def delete_agent(self, agent_id: str) -> bool:
         """Delete an agent by ID"""
@@ -57,6 +95,23 @@ class AgentService:
             self.db.commit()
             return True
         return False
+
+    async def chat_with_agent(self, agent_id: str, message: str) -> str:
+        """Chat with an agent"""
+        try:
+            return await self.execute_agent(agent_id, message)
+        except Exception as e:
+            # Log the error for debugging
+            print(f"Error chatting with agent {agent_id}: {str(e)}")
+            # Return a more user-friendly error message
+            if "API key" in str(e):
+                return "Invalid API key. Please check your API key configuration."
+            elif "401" in str(e):
+                return "Authentication failed. Please verify your API key."
+            elif "403" in str(e):
+                return "Access forbidden. Please check your API key permissions."
+            else:
+                return f"Error communicating with the agent: {str(e)}"
     
     async def execute_agent(self, agent_id: str, input_text: str, thread_id: Optional[str] = None) -> str:
         """Execute an agent with the given input"""
@@ -64,16 +119,53 @@ class AgentService:
         if not agent:
             raise ValueError("Agent not found")
         
-        # Create the LangGraph agent based on configuration
-        langgraph_agent = self._create_langgraph_agent(agent)
-        
-        # Execute the agent
-        config = {"configurable": {"thread_id": thread_id or agent_id}}
-        response = langgraph_agent.invoke({"messages": [HumanMessage(content=input_text)]}, config)
-        
-        # Extract the final response
-        final_message = response["messages"][-1]
-        return final_message.content if hasattr(final_message, 'content') else str(final_message)
+        try:
+            # Create the LangGraph agent based on configuration
+            langgraph_agent = self._create_langgraph_agent(agent)
+            
+            # Execute the agent
+            config = {"configurable": {"thread_id": thread_id or agent_id}}
+            response = langgraph_agent.invoke({"messages": [HumanMessage(content=input_text)]}, config)
+            
+            # Extract the final response
+            # Handle different response formats
+            if isinstance(response, dict):
+                if "messages" in response and len(response["messages"]) > 0:
+                    # Standard format with messages key
+                    final_message = response["messages"][-1]
+                else:
+                    # Direct response in dict
+                    final_message = response
+            else:
+                # Direct response object
+                final_message = response
+                
+            # Return the content if available, otherwise convert to string
+            try:
+                if hasattr(final_message, 'content') and final_message.content is not None:
+                    return str(final_message.content)
+                elif isinstance(final_message, dict):
+                    # If it's a dict, try to get content or convert to string
+                    return str(final_message.get('content', str(final_message)))
+                else:
+                    return str(final_message)
+            except:
+                # Fallback to string representation
+                return str(final_message)
+        except Exception as e:
+            # Handle API errors more gracefully
+            error_msg = str(e)
+            print(f"Error executing agent {agent_id}: {error_msg}")
+            
+            # Check for common API errors
+            if "API key" in error_msg or "401" in error_msg:
+                raise ValueError("Invalid API key. Please check your API key configuration.")
+            elif "403" in error_msg:
+                raise ValueError("Access forbidden. Please check your API key permissions.")
+            elif "429" in error_msg:
+                raise ValueError("Rate limit exceeded. Please try again later.")
+            else:
+                raise ValueError(f"Error communicating with the agent: {error_msg}")
     
     async def stream_agent(self, websocket, agent_id: str):
         """Stream agent responses via WebSocket"""
@@ -91,11 +183,20 @@ class AgentService:
     
     def _create_langgraph_agent(self, agent_config: AgentInDB):
         """Create a LangGraph agent based on the configuration"""
-        # Initialize the LLM based on provider
+        # Decrypt the user API key if available
+        user_api_key = None
+        if hasattr(agent_config, 'api_key_encrypted') and agent_config.api_key_encrypted:
+            try:
+                user_api_key = self._decrypt_api_key(agent_config.api_key_encrypted)
+            except Exception as e:
+                print(f"Warning: Could not decrypt API key for agent {agent_config.agent_id}: {e}")
+        
+        # Initialize the LLM based on provider and user API key
         llm = self._initialize_llm(
             agent_config.llm_provider,
             agent_config.llm_model,
-            agent_config.temperature
+            agent_config.temperature,
+            user_api_key
         )
         
         # Create the agent graph based on type
@@ -108,83 +209,351 @@ class AgentService:
         else:  # custom
             return self._create_custom_agent(llm, agent_config)
     
-    def _initialize_llm(self, provider: str, model: str, temperature: float):
-        """Initialize the LLM based on provider"""
-        if provider == "openai":
+    def _initialize_llm(self, provider: str, model: str, temperature: float, user_api_key: Optional[str] = None):
+        """Initialize the LLM based on provider and user API key"""
+        # Use user-provided API key if available, otherwise fall back to system keys
+        openai_api_key = user_api_key or settings.OPENAI_API_KEY
+        anthropic_api_key = user_api_key or settings.ANTHROPIC_API_KEY
+        groq_api_key = user_api_key or settings.GROQ_API_KEY
+        
+        # Check if API keys are available
+        openai_key_available = bool(openai_api_key and openai_api_key.strip())
+        anthropic_key_available = bool(anthropic_api_key and anthropic_api_key.strip())
+        groq_key_available = bool(groq_api_key and groq_api_key.strip())
+        
+        if provider == "openai" and openai_key_available:
             return ChatOpenAI(
                 model=model,
                 temperature=temperature,
-                api_key=settings.OPENAI_API_KEY
+                api_key=openai_api_key
             )
-        elif provider == "anthropic":
+        elif provider == "anthropic" and anthropic_key_available:
             return ChatAnthropic(
                 model=model,
                 temperature=temperature,
-                anthropic_api_key=settings.ANTHROPIC_API_KEY
+                anthropic_api_key=anthropic_api_key
+            )
+        elif provider == "groq" and groq_key_available:
+            return ChatGroq(
+                model=model,
+                temperature=temperature,
+                groq_api_key=groq_api_key
             )
         # Add other providers as needed
-        else:
-            # Default to OpenAI if provider not recognized
+        elif openai_key_available:
+            # Default to OpenAI if provider not recognized but key is available
             return ChatOpenAI(
                 model=model,
                 temperature=temperature,
-                api_key=settings.OPENAI_API_KEY
+                api_key=openai_api_key
             )
+        else:
+            # Return a mock LLM that provides informative responses when no API key is available
+            return FakeListLLM(responses=[
+                f"I'm a {model} agent simulation. In a real deployment, I would connect to the {provider} API to generate responses.",
+                f"This is a simulated response from a {model} model. Please configure your {provider} API key to get real responses.",
+                f"Mock response from {provider} {model} model. Add your API key to .env file to enable real functionality."
+            ])
     
     def _create_react_agent(self, llm, agent_config):
-        """Create a ReAct agent"""
-        # This is a simplified implementation
-        # In practice, you would use LangGraph's prebuilt ReAct agent
-        workflow = StateGraph(dict)
+        """Create a generic ReAct agent with adaptable tools"""
+        from langchain_core.prompts import PromptTemplate
+        from langchain_core.output_parsers import StrOutputParser
         
-        # Define the agent logic here
-        # This would include the ReAct loop, tool calling, etc.
+        # Define a web search tool
+        @tool
+        def web_search(query: str) -> str:
+            """Search the web for information.
+            
+            Args:
+                query: Search query
+                
+            Returns:
+                Summary of search results
+            """
+            # This is a placeholder - in a real implementation, you would connect to a search API
+            search_prompt = PromptTemplate.from_template("""You are a search engine simulator. 
+            Provide a relevant response for the search query: {query}""")
+            
+            chain = search_prompt | llm | StrOutputParser()
+            try:
+                result = chain.invoke({"query": query})
+                return result
+            except Exception as e:
+                return f"Search results for '{query}': [Simulated results would appear here]"
         
-        workflow.set_entry_point("agent")
-        workflow.add_node("agent", lambda x: x)  # Placeholder
-        workflow.add_edge("agent", END)
+        # Define a calculation tool
+        @tool
+        def calculator(expression: str) -> str:
+            """Perform mathematical calculations.
+            
+            Args:
+                expression: Mathematical expression to evaluate
+                
+            Returns:
+                Result of the calculation
+            """
+            try:
+                # Simple evaluation - in practice, you'd want to be more careful about security
+                result = eval(expression)
+                return str(result)
+            except Exception as e:
+                return f"Error calculating '{expression}': {str(e)}"
         
-        return workflow.compile()
+        # Define a general information tool
+        @tool
+        def get_general_info(topic: str) -> str:
+            """Get general information about a topic.
+            
+            Args:
+                topic: Topic to get information about
+                
+            Returns:
+                Information about the topic
+            """
+            info_prompt = PromptTemplate.from_template("""You are an encyclopedia. 
+            Provide concise, accurate information about the following topic: {topic}""")
+            
+            chain = info_prompt | llm | StrOutputParser()
+            try:
+                result = chain.invoke({"topic": topic})
+                return result
+            except Exception as e:
+                return f"Information about '{topic}': [Information would appear here]"
+        
+        # Create the ReAct agent with the LLM and tools
+        tools = [web_search, calculator, get_general_info]
+        react_agent = create_react_agent(llm, tools)
+        
+        return react_agent
     
     def _create_plan_execute_agent(self, llm, agent_config):
-        """Create a Plan & Execute agent"""
-        # Implementation for Plan & Execute pattern
-        workflow = StateGraph(dict)
+        """Create a generic Plan & Execute agent for complex multi-step tasks"""
+        from langchain_core.prompts import PromptTemplate
+        from langchain_core.output_parsers import StrOutputParser
         
-        # Define the plan-execute logic here
+        # Define state for the agent
+        from typing import Annotated, Sequence, TypedDict
+        from langgraph.graph import add_messages
         
+        class PlanExecuteState(TypedDict):
+            input: str
+            plan: str
+            past_steps: Annotated[Sequence[str], add_messages]
+            response: str
+        
+        # Planner node - creates a plan
+        def planner_node(state: PlanExecuteState):
+            """Create a plan for executing the user request"""
+            planner_prompt = PromptTemplate.from_template("""You are an expert at creating plans for complex tasks.
+            
+For the user request, create a detailed plan with steps. Each step should be a single actionable item.
+
+User Request: {input}
+
+Plan:""")
+            
+            chain = planner_prompt | llm | StrOutputParser()
+            plan = chain.invoke({"input": state["input"]})
+            return {"plan": plan}
+        
+        # Executor node - executes the plan
+        def executor_node(state: PlanExecuteState):
+            """Execute the plan steps"""
+            executor_prompt = PromptTemplate.from_template("""You are an expert at executing plans.
+            
+Here is the plan to execute:
+{plan}
+
+Execute the next step and return the result.
+
+Previous steps: {past_steps}
+
+Next step result:""")
+            
+            chain = executor_prompt | llm | StrOutputParser()
+            result = chain.invoke({
+                "plan": state["plan"],
+                "past_steps": "\n".join(state["past_steps"]) if state["past_steps"] else "None"
+            })
+            
+            return {"past_steps": [result]}
+        
+        # Create the workflow
+        workflow = StateGraph(PlanExecuteState)
+        
+        # Add nodes
+        workflow.add_node("planner", planner_node)
+        workflow.add_node("executor", executor_node)
+        
+        # Add edges
         workflow.set_entry_point("planner")
-        workflow.add_node("planner", lambda x: x)  # Placeholder
-        workflow.add_node("executor", lambda x: x)  # Placeholder
         workflow.add_edge("planner", "executor")
         workflow.add_edge("executor", END)
         
         return workflow.compile()
     
     def _create_reflection_agent(self, llm, agent_config):
-        """Create a Reflection agent"""
-        # Implementation for Reflection pattern
-        workflow = StateGraph(dict)
+        """Create a generic Reflection agent that improves its responses through self-evaluation"""
+        from langchain_core.prompts import PromptTemplate
+        from langchain_core.output_parsers import StrOutputParser
+        from typing import Annotated, Sequence, TypedDict
+        from langgraph.graph import add_messages
         
-        # Define the reflection logic here
+        class ReflectionState(TypedDict):
+            input: str
+            draft: str
+            critique: str
+            revision: str
         
+        # Agent node - generates initial response
+        def agent_node(state: ReflectionState):
+            """Generate initial response"""
+            agent_prompt = PromptTemplate.from_template("""You are a helpful AI assistant.
+            
+Provide a response to the user request.
+
+User Request: {input}
+
+Response:""")
+            
+            chain = agent_prompt | llm | StrOutputParser()
+            draft = chain.invoke({"input": state["input"]})
+            return {"draft": draft}
+        
+        # Critique node - evaluates the response
+        def critique_node(state: ReflectionState):
+            """Critique the initial response"""
+            critique_prompt = PromptTemplate.from_template("""You are an expert reviewer.
+            
+Review the following response for quality, accuracy, and completeness. Point out any issues or improvements.
+
+Response: {draft}
+
+User Request: {input}
+
+Critique:""")
+            
+            chain = critique_prompt | llm | StrOutputParser()
+            critique = chain.invoke({"draft": state["draft"], "input": state["input"]})
+            return {"critique": critique}
+        
+        # Revision node - improves based on critique
+        def revision_node(state: ReflectionState):
+            """Revise the response based on critique"""
+            revision_prompt = PromptTemplate.from_template("""You are an expert editor.
+            
+Improve the response based on the critique.
+
+Original Response: {draft}
+
+Critique: {critique}
+
+User Request: {input}
+
+Improved Response:""")
+            
+            chain = revision_prompt | llm | StrOutputParser()
+            revision = chain.invoke({
+                "draft": state["draft"], 
+                "critique": state["critique"],
+                "input": state["input"]
+            })
+            return {"revision": revision}
+        
+        # Create the workflow
+        workflow = StateGraph(ReflectionState)
+        
+        # Add nodes
+        workflow.add_node("agent", agent_node)
+        workflow.add_node("critique", critique_node)
+        workflow.add_node("revision", revision_node)
+        
+        # Add edges
         workflow.set_entry_point("agent")
-        workflow.add_node("agent", lambda x: x)  # Placeholder
-        workflow.add_node("reflector", lambda x: x)  # Placeholder
-        workflow.add_edge("agent", "reflector")
-        workflow.add_edge("reflector", END)
+        workflow.add_edge("agent", "critique")
+        workflow.add_edge("critique", "revision")
+        workflow.add_edge("revision", END)
         
         return workflow.compile()
     
     def _create_custom_agent(self, llm, agent_config):
-        """Create a custom agent graph"""
-        # Implementation for custom graph pattern
-        workflow = StateGraph(dict)
+        """Create a flexible custom agent graph for specialized workflows"""
+        from langchain_core.prompts import PromptTemplate
+        from langchain_core.output_parsers import StrOutputParser
+        from typing import Annotated, Sequence, TypedDict
+        from langgraph.graph import add_messages
         
-        # Define custom logic based on agent_config
+        class CustomAgentState(TypedDict):
+            input: str
+            analysis: str
+            action: str
+            result: str
         
-        workflow.set_entry_point("start")
-        workflow.add_node("start", lambda x: x)  # Placeholder
-        workflow.add_edge("start", END)
+        # Analysis node - analyzes the request
+        def analysis_node(state: CustomAgentState):
+            """Analyze the user request and determine the approach"""
+            analysis_prompt = PromptTemplate.from_template("""You are an expert problem analyzer.
+            
+Analyze the following user request and determine the best approach to address it.
+
+User Request: {input}
+
+Analysis:""")
+            
+            chain = analysis_prompt | llm | StrOutputParser()
+            analysis = chain.invoke({"input": state["input"]})
+            return {"analysis": analysis}
+        
+        # Action node - takes action based on analysis
+        def action_node(state: CustomAgentState):
+            """Take action based on analysis"""
+            action_prompt = PromptTemplate.from_template("""You are an expert problem solver.
+            
+Based on the analysis, determine the best action to take to address the user request.
+
+Analysis: {analysis}
+
+User Request: {input}
+
+Action:""")
+            
+            chain = action_prompt | llm | StrOutputParser()
+            action = chain.invoke({"analysis": state["analysis"], "input": state["input"]})
+            return {"action": action}
+        
+        # Result formatter node - formats the result
+        def result_node(state: CustomAgentState):
+            """Format the final result"""
+            result_prompt = PromptTemplate.from_template("""You are an expert at providing clear responses.
+            
+Provide a clear, comprehensive response to the user's request based on the action taken.
+
+Action Taken: {action}
+
+User Request: {input}
+
+Final Response:""")
+            
+            chain = result_prompt | llm | StrOutputParser()
+            result = chain.invoke({
+                "action": state["action"], 
+                "input": state["input"]
+            })
+            return {"result": result}
+        
+        # Create the workflow
+        workflow = StateGraph(CustomAgentState)
+        
+        # Add nodes
+        workflow.add_node("analysis", analysis_node)
+        workflow.add_node("action", action_node)
+        workflow.add_node("result", result_node)
+        
+        # Add edges
+        workflow.set_entry_point("analysis")
+        workflow.add_edge("analysis", "action")
+        workflow.add_edge("action", "result")
+        workflow.add_edge("result", END)
         
         return workflow.compile()

@@ -17,10 +17,11 @@ class AgentBase(BaseModel):
     recursion_limit: int
 
 class AgentCreate(AgentBase):
-    api_key: str  # This won't be stored, just used for initialization
+    api_key: str  # This will be encrypted and stored
 
 class AgentInDB(AgentBase):
     agent_id: str
+    api_key_encrypted: Optional[str] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
 
@@ -30,6 +31,10 @@ class AgentInDB(AgentBase):
 class AgentExecutionRequest(BaseModel):
     input: str
     thread_id: Optional[str] = None
+
+class AgentChatRequest(BaseModel):
+    message: str
+
 
 class AgentExecutionResponse(BaseModel):
     response: str

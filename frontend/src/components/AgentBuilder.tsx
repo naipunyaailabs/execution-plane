@@ -12,6 +12,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Sparkles, Cpu, Database, GitBranch, Settings2, Thermometer, Hash, Layers, Box, FileText, Key, MessageSquare } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import { ThemeToggle } from "@/components/ThemeToggle";
+import { AgentList } from "@/components/AgentList";
 
 const LLM_PROVIDERS = [
   { value: "openai", label: "OpenAI" },
@@ -206,6 +207,10 @@ export function AgentBuilder() {
           title: "Agent Created! 🎉",
           description: `${agentName} configured with ${agentType} architecture and ID: ${agent.agent_id}`,
         });
+        // Reset form after successful creation
+        setAgentName("");
+        setSystemPrompt("");
+        setSelectedTools([]);
       } else {
         const error = await response.json();
         throw new Error(error.detail || 'Failed to create agent');
@@ -402,7 +407,7 @@ export function AgentBuilder() {
             </div>
           </div>
 
-          {/* Right Panel - Advanced Settings */}
+          {/* Right Panel - Advanced Settings and Agent List */}
           <div className="space-y-6">
             <div className="border border-border rounded-lg p-5 bg-card">
               <div className="flex items-center gap-2 mb-4">
@@ -473,6 +478,11 @@ export function AgentBuilder() {
                   />
                 </div>
               </div>
+            </div>
+
+            {/* Agent List */}
+            <div className="border border-border rounded-lg p-5 bg-card">
+              <AgentList />
             </div>
           </div>
         </div>
