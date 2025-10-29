@@ -134,16 +134,16 @@ export function AgentList({ onAgentDeleted }: AgentListProps) {
           {agents.map((agent) => (
             <Card 
               key={agent.agent_id} 
-              className="group hover:shadow-lg transition-all duration-200 hover:border-primary/50 overflow-hidden"
+              className="group hover:shadow-lg transition-all duration-200 hover:border-primary/50 overflow-hidden flex flex-col"
             >
-              <div className="p-5 flex flex-col h-full min-w-0">
-                <div className="flex items-start justify-between mb-4 gap-2 min-w-0">
+              <div className="p-5 flex flex-col gap-4 min-w-0 flex-1">
+                <div className="flex items-start justify-between gap-2 min-w-0">
                   <div className="flex items-start gap-3 flex-1 min-w-0">
                     <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-primary to-primary/70 flex items-center justify-center flex-shrink-0 shadow-sm">
                       <Bot className="w-5 h-5 text-primary-foreground" />
                     </div>
                     <div className="flex-1 min-w-0">
-                      <h3 className="font-semibold text-base truncate group-hover:text-primary transition-colors break-words">
+                      <h3 className="font-semibold text-base group-hover:text-primary transition-colors break-words line-clamp-2">
                         {agent.name}
                       </h3>
                       <p className="text-xs text-muted-foreground capitalize mt-0.5 truncate">
@@ -161,16 +161,16 @@ export function AgentList({ onAgentDeleted }: AgentListProps) {
                   </Button>
                 </div>
                 
-                <div className="mt-auto space-y-2 pt-3 border-t min-w-0">
-                  <div className="flex items-center gap-2 text-xs min-w-0">
-                    <span className="font-medium text-muted-foreground flex-shrink-0">Model:</span>
-                    <span className="truncate text-foreground min-w-0">
+                <div className="space-y-2.5 pt-3 border-t min-w-0">
+                  <div className="flex items-start gap-2 text-xs min-w-0">
+                    <span className="font-medium text-muted-foreground flex-shrink-0 pt-0.5">Model:</span>
+                    <span className="text-foreground min-w-0 break-words leading-relaxed">
                       {agent.llm_provider} / {agent.llm_model}
                     </span>
                   </div>
                   <div className="flex items-start gap-2 text-xs min-w-0">
-                    <span className="font-medium text-muted-foreground whitespace-nowrap flex-shrink-0">Tools:</span>
-                    <span className="text-foreground min-w-0 break-words line-clamp-2">
+                    <span className="font-medium text-muted-foreground whitespace-nowrap flex-shrink-0 pt-0.5">Tools:</span>
+                    <span className="text-foreground min-w-0 break-words leading-relaxed">
                       {agent.tools.length > 0 ? agent.tools.join(", ") : "None"}
                     </span>
                   </div>
