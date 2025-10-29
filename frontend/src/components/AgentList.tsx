@@ -134,19 +134,19 @@ export function AgentList({ onAgentDeleted }: AgentListProps) {
           {agents.map((agent) => (
             <Card 
               key={agent.agent_id} 
-              className="group hover:shadow-lg transition-all duration-200 hover:border-primary/50"
+              className="group hover:shadow-lg transition-all duration-200 hover:border-primary/50 overflow-hidden"
             >
-              <div className="p-5 flex flex-col h-full">
-                <div className="flex items-start justify-between mb-4">
-                  <div className="flex items-start gap-3 flex-1">
+              <div className="p-5 flex flex-col h-full min-w-0">
+                <div className="flex items-start justify-between mb-4 gap-2 min-w-0">
+                  <div className="flex items-start gap-3 flex-1 min-w-0">
                     <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-primary to-primary/70 flex items-center justify-center flex-shrink-0 shadow-sm">
                       <Bot className="w-5 h-5 text-primary-foreground" />
                     </div>
                     <div className="flex-1 min-w-0">
-                      <h3 className="font-semibold text-base truncate group-hover:text-primary transition-colors">
+                      <h3 className="font-semibold text-base truncate group-hover:text-primary transition-colors break-words">
                         {agent.name}
                       </h3>
-                      <p className="text-xs text-muted-foreground capitalize mt-0.5">
+                      <p className="text-xs text-muted-foreground capitalize mt-0.5 truncate">
                         {agent.agent_type}
                       </p>
                     </div>
@@ -155,22 +155,22 @@ export function AgentList({ onAgentDeleted }: AgentListProps) {
                     variant="ghost"
                     size="icon"
                     onClick={() => handleDeleteAgent(agent.agent_id, agent.name)}
-                    className="text-muted-foreground hover:text-destructive hover:bg-destructive/10 -mt-1 -mr-2 opacity-0 group-hover:opacity-100 transition-opacity"
+                    className="text-muted-foreground hover:text-destructive hover:bg-destructive/10 -mt-1 -mr-2 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0"
                   >
                     <Trash2 className="w-4 h-4" />
                   </Button>
                 </div>
                 
-                <div className="mt-auto space-y-2 pt-3 border-t">
-                  <div className="flex items-center gap-2 text-xs">
-                    <span className="font-medium text-muted-foreground">Model:</span>
-                    <span className="truncate text-foreground">
+                <div className="mt-auto space-y-2 pt-3 border-t min-w-0">
+                  <div className="flex items-center gap-2 text-xs min-w-0">
+                    <span className="font-medium text-muted-foreground flex-shrink-0">Model:</span>
+                    <span className="truncate text-foreground min-w-0">
                       {agent.llm_provider} / {agent.llm_model}
                     </span>
                   </div>
-                  <div className="flex items-start gap-2 text-xs">
-                    <span className="font-medium text-muted-foreground whitespace-nowrap">Tools:</span>
-                    <span className="truncate text-foreground">
+                  <div className="flex items-start gap-2 text-xs min-w-0">
+                    <span className="font-medium text-muted-foreground whitespace-nowrap flex-shrink-0">Tools:</span>
+                    <span className="text-foreground min-w-0 break-words line-clamp-2">
                       {agent.tools.length > 0 ? agent.tools.join(", ") : "None"}
                     </span>
                   </div>
