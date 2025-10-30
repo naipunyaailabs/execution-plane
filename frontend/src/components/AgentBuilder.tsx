@@ -192,7 +192,7 @@ export function AgentBuilder() {
     };
 
     try {
-      const response = await fetch('http://localhost:8000/api/v1/agents', {
+      const response = await fetch('http://localhost:8001/api/v1/agents/', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

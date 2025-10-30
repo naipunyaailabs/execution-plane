@@ -90,13 +90,13 @@ async def execute_agent(agent_id: str, request: AgentExecutionRequest, db: Sessi
         raise HTTPException(status_code=400, detail=str(e))
 
 
-@router.post("/{agent_id}/chat", response_model=AgentExecutionResponse)
+@router.post("/{agent_id}/chat/", response_model=AgentExecutionResponse)
 async def chat_with_agent(agent_id: str, request: AgentChatRequest, db: Session = Depends(get_db)):
     """Chat with an agent"""
     try:
         agent_service = AgentService(db)
-        response = await agent_service.chat_with_agent(agent_id, request.message)
-        return AgentExecutionResponse(response=response, thread_id=agent_id)
+        response = await agent_service.chat_with_agent(agent_id, request.message, request.thread_id)
+        return AgentExecutionResponse(response=response, thread_id=request.thread_id or agent_id)
     except ValueError as e:
         # Handle validation errors (like API key issues) with 400 status
         raise HTTPException(status_code=400, detail=str(e))

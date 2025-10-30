@@ -4,6 +4,7 @@ from typing import List, Dict, Any, Optional
 from sqlalchemy.orm import Session
 from langgraph.graph import StateGraph, END
 from langgraph.prebuilt import create_react_agent
+from langgraph.checkpoint.memory import MemorySaver
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.tools import tool
@@ -18,6 +19,9 @@ from cryptography.fernet import Fernet
 from models.agent import Agent as AgentModel
 from schemas.agent import AgentCreate, AgentInDB
 from core.config import settings
+
+# Global MemorySaver instance for all agents
+_memory_saver = MemorySaver()
 
 class AgentService:
     def __init__(self, db: Session):
@@ -96,10 +100,10 @@ class AgentService:
             return True
         return False
 
-    async def chat_with_agent(self, agent_id: str, message: str) -> str:
+    async def chat_with_agent(self, agent_id: str, message: str, thread_id: Optional[str] = None) -> str:
         """Chat with an agent"""
         try:
-            return await self.execute_agent(agent_id, message)
+            return await self.execute_agent(agent_id, message, thread_id)
         except Exception as e:
             # Log the error for debugging
             print(f"Error chatting with agent {agent_id}: {str(e)}")
@@ -121,6 +125,7 @@ class AgentService:
         
         try:
             # Create the LangGraph agent based on configuration
+            # We don't cache agents because memory persistence is handled by the checkpointer with thread_id
             langgraph_agent = self._create_langgraph_agent(agent)
             
             # Execute the agent with the appropriate input format based on agent type
@@ -264,6 +269,7 @@ class AgentService:
             )
         else:
             # Return a mock LLM that provides informative responses when no API key is available
+            # Note: FakeListLLM doesn't support tools, so we need to handle this case specially
             return FakeListLLM(responses=[
                 f"I'm a {model} agent simulation. In a real deployment, I would connect to the {provider} API to generate responses.",
                 f"This is a simulated response from a {model} model. Please configure your {provider} API key to get real responses.",
@@ -275,72 +281,106 @@ class AgentService:
         from langchain_core.prompts import PromptTemplate
         from langchain_core.output_parsers import StrOutputParser
         
-        # Define a web search tool
-        @tool
-        def web_search(query: str) -> str:
-            """Search the web for information.
-            
-            Args:
-                query: Search query
+        # Check if the LLM supports tools (bind_tools method)
+        # FakeListLLM doesn't support tools, so we need to handle this case
+        if hasattr(llm, 'bind_tools'):
+            # Define a web search tool
+            @tool
+            def web_search(query: str) -> str:
+                """Search the web for information.
                 
-            Returns:
-                Summary of search results
-            """
-            # This is a placeholder - in a real implementation, you would connect to a search API
-            search_prompt = PromptTemplate.from_template("""You are a search engine simulator. 
-            Provide a relevant response for the search query: {query}""")
-            
-            chain = search_prompt | llm | StrOutputParser()
-            try:
-                result = chain.invoke({"query": query})
-                return result
-            except Exception as e:
-                return f"Search results for '{query}': [Simulated results would appear here]"
-        
-        # Define a calculation tool
-        @tool
-        def calculator(expression: str) -> str:
-            """Perform mathematical calculations.
-            
-            Args:
-                expression: Mathematical expression to evaluate
+                Args:
+                    query: Search query
+                    
+                Returns:
+                    Summary of search results
+                """
+                # This is a placeholder - in a real implementation, you would connect to a search API
+                search_prompt = PromptTemplate.from_template("""You are a search engine simulator. 
+                Provide a relevant response for the search query: {query}""")
                 
-            Returns:
-                Result of the calculation
-            """
-            try:
-                # Simple evaluation - in practice, you'd want to be more careful about security
-                result = eval(expression)
-                return str(result)
-            except Exception as e:
-                return f"Error calculating '{expression}': {str(e)}"
-        
-        # Define a general information tool
-        @tool
-        def get_general_info(topic: str) -> str:
-            """Get general information about a topic.
+                chain = search_prompt | llm | StrOutputParser()
+                try:
+                    result = chain.invoke({"query": query})
+                    return result
+                except Exception as e:
+                    return f"Search results for '{query}': [Simulated results would appear here]"
             
-            Args:
-                topic: Topic to get information about
+            # Define a calculation tool
+            @tool
+            def calculator(expression: str) -> str:
+                """Perform mathematical calculations.
                 
-            Returns:
-                Information about the topic
-            """
-            info_prompt = PromptTemplate.from_template("""You are an encyclopedia. 
-            Provide concise, accurate information about the following topic: {topic}""")
+                Args:
+                    expression: Mathematical expression to evaluate
+                    
+                Returns:
+                    Result of the calculation
+                """
+                try:
+                    # Simple evaluation - in practice, you'd want to be more careful about security
+                    result = eval(expression)
+                    return str(result)
+                except Exception as e:
+                    return f"Error calculating '{expression}': {str(e)}"
             
-            chain = info_prompt | llm | StrOutputParser()
-            try:
-                result = chain.invoke({"topic": topic})
-                return result
-            except Exception as e:
-                return f"Information about '{topic}': [Information would appear here]"
-        
-        # Create the ReAct agent with the LLM and tools
-        tools = [web_search, calculator, get_general_info]
-        react_agent = create_react_agent(llm, tools)
-        
-        return react_agent
+            # Define a general information tool
+            @tool
+            def get_general_info(topic: str) -> str:
+                """Get general information about a topic.
+                
+                Args:
+                    topic: Topic to get information about
+                    
+                Returns:
+                    Information about the topic
+                """
+                info_prompt = PromptTemplate.from_template("""You are an encyclopedia. 
+                Provide concise, accurate information about the following topic: {topic}""")
+                
+                chain = info_prompt | llm | StrOutputParser()
+                try:
+                    result = chain.invoke({"topic": topic})
+                    return result
+                except Exception as e:
+                    return f"Information about '{topic}': [Information would appear here]"
+            
+            # Create the tools list
+            tools = [web_search, calculator, get_general_info]
+            
+            # Create the ReAct agent with the LLM and tools
+            react_agent = create_react_agent(llm, tools)
+            # Compile with the shared checkpointer for memory management
+            return react_agent.compile(checkpointer=_memory_saver)
+        else:
+            # For LLMs that don't support tools (like FakeListLLM), create a simple chat agent
+            from langgraph.graph import StateGraph, START
+            from typing import Annotated
+            from typing_extensions import TypedDict
+            from operator import add
+            from langchain_core.messages import HumanMessage, AIMessage
+            
+            class MessagesState(TypedDict):
+                messages: Annotated[list, add]
+            
+            def call_model(state: MessagesState):
+                # For mock LLMs, just return a response
+                # Get the last message content
+                last_message = state["messages"][-1] if state["messages"] else ""
+                content = getattr(last_message, 'content', str(last_message))
+                
+                # Get a response from the mock LLM
+                response = llm.invoke(content)
+                return {"messages": [AIMessage(content=response)]}
+            
+            # Create a simple state graph for mock LLMs
+            workflow = StateGraph(MessagesState)
+            workflow.add_node("call_model", call_model)
+            workflow.add_edge(START, "call_model")
+            workflow.add_edge("call_model", END)
+            
+            # Compile with the shared checkpointer for memory management
+            return workflow.compile(checkpointer=_memory_saver)
     
     def _create_plan_execute_agent(self, llm, agent_config):
         """Create a generic Plan & Execute agent for complex multi-step tasks"""
@@ -408,7 +448,8 @@ Next step result:""")
         workflow.add_edge("planner", "executor")
         workflow.add_edge("executor", END)
         
-        return workflow.compile()
+        # Compile with the shared checkpointer for memory management
+        return workflow.compile(checkpointer=_memory_saver)
     
     def _create_reflection_agent(self, llm, agent_config):
         """Create a generic Reflection agent that improves its responses through self-evaluation"""
@@ -495,7 +536,8 @@ Improved Response:""")
         workflow.add_edge("critique", "revision")
         workflow.add_edge("revision", END)
         
-        return workflow.compile()
+        # Compile with the shared checkpointer for memory management
+        return workflow.compile(checkpointer=_memory_saver)
     
     def _create_custom_agent(self, llm, agent_config):
         """Create a flexible custom agent graph for specialized workflows"""
@@ -579,4 +621,5 @@ Final Response:""")
         workflow.add_edge("action", "result")
         workflow.add_edge("result", END)
         
-        return workflow.compile()
+        # Compile with the shared checkpointer for memory management
+        return workflow.compile(checkpointer=_memory_saver)

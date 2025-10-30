@@ -38,10 +38,13 @@ export function AgentChat() {
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [threadId, setThreadId] = useState<string>("");
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     fetchAgents();
+    // Generate a unique thread ID for this conversation session
+    setThreadId(`thread_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`);
   }, []);
 
   useEffect(() => {
@@ -52,7 +55,7 @@ export function AgentChat() {
 
   const fetchAgents = async () => {
     try {
-      const response = await fetch('http://localhost:8000/api/v1/agents');
+      const response = await fetch('http://localhost:8001/api/v1/agents/');
       if (response.ok) {
         const data = await response.json();
         setAgents(data);
@@ -72,7 +75,7 @@ export function AgentChat() {
 
   const handleDeleteAgent = async (agentId: string, agentName: string) => {
     try {
-      const response = await fetch(`http://localhost:8000/api/v1/agents/${agentId}`, {
+      const response = await fetch(`http://localhost:8001/api/v1/agents/${agentId}/`, {
         method: 'DELETE',
       });
 
@@ -122,13 +125,15 @@ export function AgentChat() {
     setIsLoading(true);
 
     try {
-      // TODO: Replace with actual agent chat endpoint
-      const response = await fetch(`http://localhost:8000/api/v1/agents/${selectedAgentId}/chat`, {
+      const response = await fetch(`http://localhost:8001/api/v1/agents/${selectedAgentId}/chat/`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ message: input }),
+        body: JSON.stringify({ 
+          message: input,
+          thread_id: threadId
+        }),
       });
 
       if (response.ok) {

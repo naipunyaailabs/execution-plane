@@ -7,11 +7,6 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
-node_modules
-dist
-dist-ssr
-*.local
-
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
@@ -22,49 +17,6 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
-
-# Python virtual environments
-backend/venv
-backend/venv*/
-backend/*.db
-.env
-*.pyc
-__pycache__/
-.pytest_cache/
-
-# Additional Python files that should be ignored
-*.pyc
-*.pyo
-*.pyd
-.Python
-*.so
-.coverage
-.coverage.*
-.cache
-.pytest_cache/*
-*.egg-info/
-*.egg
-pip-log.txt
-pip-delete-this-directory.txt
-htmlcov/
-.tox/
-.nox/
-.coverage
-.coverage.*
-.cache
-.pytest_cache/*
-*.egg-info/
-*.egg
-pip-log.txt
-pip-delete-this-directory.txt
-htmlcov/
-.tox/
-.nox/
-
-# Database files
-*.db
-*.sqlite3
-*.sqlite
 
 # OS generated files
 .DS_Store
@@ -80,9 +32,6 @@ Thumbs.db
 *.swo
 *~
 
-# Additional cache files
-**/__pycache__/
-**/*.pyc
-**/*.pyo
-**/*.pyd
-**/.pytest_cache/
+# Global ignores that apply to both frontend and backend
+*.tmp
+*.temp

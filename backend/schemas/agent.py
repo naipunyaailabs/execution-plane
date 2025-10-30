@@ -34,6 +34,7 @@ class AgentExecutionRequest(BaseModel):
 
 class AgentChatRequest(BaseModel):
     message: str
+    thread_id: Optional[str] = None
 
 
 class AgentExecutionResponse(BaseModel):
