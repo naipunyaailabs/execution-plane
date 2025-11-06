@@ -1,13 +1,12 @@
 from fastapi import APIRouter, Depends, HTTPException, WebSocket
-from typing import List
+from typing import List, Dict, Any, Optional
 from sqlalchemy.orm import Session
+from datetime import datetime
 
 from schemas.agent import AgentCreate, AgentInDB, AgentExecutionRequest, AgentExecutionResponse, AgentChatRequest
 from services.agent_service import AgentService
 from core.database import get_db
 from pydantic import BaseModel
-from typing import Optional
-from datetime import datetime
 
 # Response model that excludes sensitive information like encrypted API keys
 class AgentResponse(BaseModel):
@@ -28,6 +27,23 @@ class AgentResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+# Memory-related models
+class MemoryAddRequest(BaseModel):
+    messages: List[Dict[str, str]]
+    user_id: str
+    agent_id: Optional[str] = None
+
+class MemorySearchRequest(BaseModel):
+    query: str
+    user_id: str
+    agent_id: Optional[str] = None
+    top_k: int = 5
+
+class MemoryResponse(BaseModel):
+    success: bool
+    data: Optional[Any] = None
+    message: Optional[str] = None
 
 router = APIRouter()
 
@@ -94,7 +110,7 @@ async def chat_with_agent(agent_id: str, request: AgentChatRequest, db: Session 
     """Chat with an agent"""
     try:
         agent_service = AgentService(db)
-        response = await agent_service.chat_with_agent(agent_id, request.message)
+        response = await agent_service.chat_with_agent(agent_id, request.message, thread_id=request.thread_id)
         return AgentExecutionResponse(response=response)
     except ValueError as e:
         # Handle validation errors (like API key issues) with 400 status
@@ -129,3 +145,97 @@ async def stream_agent(websocket: WebSocket, agent_id: str, db: Session = Depend
         except Exception:
             # If we can't close the websocket, just continue
             pass
+# Memory endpoints
+@router.post("/memory/add", response_model=MemoryResponse)
+async def add_memory(request: MemoryAddRequest, db: Session = Depends(get_db)):
+    """Add a memory to mem0"""
+    try:
+        agent_service = AgentService(db)
+        if not agent_service.memory_service.is_enabled():
+            return MemoryResponse(success=False, message="Memory service not enabled. Please configure MEM0_API_KEY.")
+        
+        result = agent_service.memory_service.add_memory(
+            messages=request.messages,
+            user_id=request.user_id,
+            agent_id=request.agent_id or None
+        )
+        
+        if result:
+            return MemoryResponse(success=True, data=result, message="Memory added successfully")
+        else:
+            return MemoryResponse(success=False, message="Failed to add memory")
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@router.post("/memory/search", response_model=MemoryResponse)
+async def search_memory(request: MemorySearchRequest, db: Session = Depends(get_db)):
+    """Search for memories in mem0"""
+    try:
+        agent_service = AgentService(db)
+        if not agent_service.memory_service.is_enabled():
+            return MemoryResponse(success=False, message="Memory service not enabled. Please configure MEM0_API_KEY.")
+        
+        results = agent_service.memory_service.search_memory(
+            query=request.query,
+            user_id=request.user_id,
+            agent_id=request.agent_id or None,
+            top_k=request.top_k
+        )
+        
+        if results is not None:
+            return MemoryResponse(success=True, data=results, message="Memories retrieved successfully")
+        else:
+            return MemoryResponse(success=False, message="Failed to search memories")
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@router.get("/memory/user/{user_id}", response_model=MemoryResponse)
+async def get_user_memories(user_id: str, agent_id: Optional[str] = None, db: Session = Depends(get_db)):
+    """Get all memories for a user"""
+    try:
+        agent_service = AgentService(db)
+        if not agent_service.memory_service.is_enabled():
+            return MemoryResponse(success=False, message="Memory service not enabled. Please configure MEM0_API_KEY.")
+        
+        results = agent_service.memory_service.get_user_memories(user_id=user_id, agent_id=agent_id or None)
+        
+        if results is not None:
+            return MemoryResponse(success=True, data=results, message="User memories retrieved successfully")
+        else:
+            return MemoryResponse(success=False, message="Failed to retrieve user memories")
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@router.delete("/memory/session/{session_id}", response_model=MemoryResponse)
+async def delete_session_memories(session_id: str, db: Session = Depends(get_db)):
+    """Delete all memories for a session (called on refresh/session end)"""
+    try:
+        agent_service = AgentService(db)
+        if not agent_service.memory_service.is_enabled():
+            return MemoryResponse(success=False, message="Memory service not enabled.")
+        
+        success = agent_service.memory_service.delete_session_memories(session_id=session_id)
+        
+        if success:
+            return MemoryResponse(success=True, message=f"Session memories deleted successfully for {session_id}")
+        else:
+            return MemoryResponse(success=False, message="Failed to delete session memories")
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@router.post("/memory/session/{session_id}", response_model=MemoryResponse)
+async def delete_session_memories_post(session_id: str, db: Session = Depends(get_db)):
+    """Delete all memories for a session (supports POST for navigator.sendBeacon)."""
+    try:
+        agent_service = AgentService(db)
+        if not agent_service.memory_service.is_enabled():
+            return MemoryResponse(success=False, message="Memory service not enabled.")
+
+        success = agent_service.memory_service.delete_session_memories(session_id=session_id)
+
+        if success:
+            return MemoryResponse(success=True, message=f"Session memories deleted successfully for {session_id}")
+        else:
+            return MemoryResponse(success=False, message="Failed to delete session memories")
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))

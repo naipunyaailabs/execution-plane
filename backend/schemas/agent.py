@@ -33,6 +33,7 @@ class AgentExecutionRequest(BaseModel):
 
 class AgentChatRequest(BaseModel):
     message: str
+    thread_id: Optional[str] = None  # Session ID for ephemeral memory
 
 
 class AgentExecutionResponse(BaseModel):

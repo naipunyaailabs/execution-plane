@@ -1,6 +1,10 @@
 import os
 from typing import List
 from pydantic_settings import BaseSettings
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 class Settings(BaseSettings):
     # API settings
@@ -20,6 +24,9 @@ class Settings(BaseSettings):
     OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
     ANTHROPIC_API_KEY: str = os.getenv("ANTHROPIC_API_KEY", "")
     GROQ_API_KEY: str = os.getenv("GROQ_API_KEY", "")
+    
+    # Mem0 API Key (for memory functionality)
+    MEM0_API_KEY: str = os.getenv("MEM0_API_KEY", "")
     
     class Config:
         case_sensitive = True

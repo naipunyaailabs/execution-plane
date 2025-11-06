@@ -44,7 +44,40 @@ export function AgentChat() {
   useEffect(() => {
     fetchAgents();
     // Generate a unique thread ID for this conversation session
-    setThreadId(`thread_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`);
+    const newThreadId = `thread_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    setThreadId(newThreadId);
+
+    // Cleanup function to delete session memories on unmount or refresh
+    const cleanupSession = async () => {
+      if (newThreadId) {
+        try {
+          await fetch(`http://localhost:8001/api/v1/agents/memory/session/${newThreadId}`, {
+            method: 'DELETE',
+          });
+          console.log(`Session ${newThreadId} cleaned up`);
+        } catch (error) {
+          console.error("Error cleaning up session:", error);
+        }
+      }
+    };
+
+    // Cleanup on page unload (refresh/close)
+    const handleBeforeUnload = () => {
+      // Use sendBeacon for reliable cleanup on page unload
+      if (newThreadId) {
+        navigator.sendBeacon(
+          `http://localhost:8001/api/v1/agents/memory/session/${newThreadId}`,
+        );
+      }
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+
+    // Cleanup on component unmount
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+      cleanupSession();
+    };
   }, []);
 
   useEffect(() => {

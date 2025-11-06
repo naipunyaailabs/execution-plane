@@ -18,6 +18,7 @@ Build and configure custom AI agents with advanced LangGraph capabilities. Selec
 - Node.js (v16 or higher)
 - Python (v3.8 or higher)
 - npm or yarn
+- Ollama (for local embeddings)
 
 ### Installation
 
@@ -46,6 +47,13 @@ Build and configure custom AI agents with advanced LangGraph capabilities. Selec
    ANTHROPIC_API_KEY=your_anthropic_api_key
    GROQ_API_KEY=your_groq_api_key
    SECRET_KEY=your_secret_key_for_encryption
+   ```
+
+5. Install and set up Ollama for local embeddings:
+   ```bash
+   # Install Ollama from https://ollama.com/
+   # Pull the qwen3-embedding model
+   ollama pull qwen3-embedding:0.6b
    ```
 
 ### Running the Application
@@ -110,6 +118,24 @@ Built with React, TypeScript, Vite, and shadcn/ui components.
 ### Backend
 
 Built with FastAPI, LangGraph, and SQLAlchemy.
+
+## Qdrant Memory Integration
+
+This platform now includes enhanced memory capabilities powered by Qdrant vector database with local embeddings. With Qdrant integration:
+
+- Conversations are automatically stored and retrieved for context using vector similarity search
+- Agents remember past interactions for more personalized responses
+- Memory is organized by user and agent for precise retrieval
+- All data is stored locally using Qdrant's embedded storage
+
+To enable Qdrant integration:
+
+1. Install Ollama from [https://ollama.com/](https://ollama.com/)
+2. Pull the qwen3-embedding model: `ollama pull qwen3-embedding:0.6b`
+3. Install the required Python packages: `pip install -r requirements.txt`
+4. Restart the backend service
+
+Refer to `backend/README_MEM0.md` for detailed setup instructions and API usage.
 
 ## Contributing
 

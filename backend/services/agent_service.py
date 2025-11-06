@@ -16,6 +16,8 @@ import hashlib
 import base64
 from cryptography.fernet import Fernet
 
+from services.memory_service import MemoryService
+
 from models.agent import Agent as AgentModel
 from schemas.agent import AgentCreate, AgentInDB
 from core.config import settings
@@ -27,6 +29,9 @@ class AgentService:
         # Generate encryption key from settings or create a default one
         # In production, this should be stored securely
         self._encryption_key = self._get_or_create_encryption_key()
+        
+        # Initialize memory service for mem0 integration
+        self.memory_service = MemoryService()
     
     def _get_or_create_encryption_key(self) -> bytes:
         # In production, this should come from a secure environment variable
@@ -98,40 +103,116 @@ class AgentService:
             return True
         return False
 
-    async def chat_with_agent(self, agent_id: str, message: str) -> str:
+    async def chat_with_agent(self, agent_id: str, message: str, thread_id: Optional[str] = None) -> str:
         """Chat with an agent"""
         try:
-            return await self.execute_agent(agent_id, message)
+            # Use thread_id if provided (session-based), otherwise use agent_id (persistent)
+            session_id = thread_id if thread_id else f"agent_{agent_id}"
+            
+            # Execute the agent and get response
+            response = await self.execute_agent(agent_id, message, session_id=session_id)
+            
+            # Store the interaction in mem0 memory if enabled
+            # Store both user and assistant messages to preserve conversation context
+            if self.memory_service.is_enabled():
+                try:
+                    # Get agent to access its LLM configuration
+                    agent = await self.get_agent(agent_id)
+                    if agent:
+                        # Store both messages for full conversational context
+                        # Mem0 is configured to extract user-specific facts
+                        interaction = [
+                            {"role": "user", "content": message},
+                            {"role": "assistant", "content": response}
+                        ]
+                        self.memory_service.add_memory(
+                            interaction, 
+                            user_id=session_id, 
+                            agent_id=agent_id,
+                            llm_provider=agent.llm_provider,
+                            llm_model=agent.llm_model
+                        )
+                except Exception as mem_error:
+                    print(f"Error storing memory: {mem_error}")
+            
+            return response
         except Exception as e:
             # Log the error for debugging
             print(f"Error chatting with agent {agent_id}: {str(e)}")
             # Return a more user-friendly error message
-            if "API key" in str(e):
+            error_msg = str(e)
+            # Check for specific API key errors from LLM providers
+            if (("API key" in error_msg or "401" in error_msg) and 
+                ("OpenAI" in error_msg or "Anthropic" in error_msg or "Groq" in error_msg or "api_key" in error_msg.lower())):
                 return "Invalid API key. Please check your API key configuration."
-            elif "401" in str(e):
-                return "Authentication failed. Please verify your API key."
-            elif "403" in str(e):
+            elif "403" in error_msg and ("OpenAI" in error_msg or "Anthropic" in error_msg or "Groq" in error_msg):
                 return "Access forbidden. Please check your API key permissions."
+            elif "429" in error_msg and ("OpenAI" in error_msg or "Anthropic" in error_msg or "Groq" in error_msg):
+                return "Rate limit exceeded. Please try again later."
             else:
-                return f"Error communicating with the agent: {str(e)}"
+                return f"Error communicating with the agent: {error_msg}"
     
-    async def execute_agent(self, agent_id: str, input_text: str) -> str:
+    async def execute_agent(self, agent_id: str, input_text: str, session_id: Optional[str] = None) -> str:
         """Execute an agent with the given input"""
         agent = await self.get_agent(agent_id)
         if not agent:
             raise ValueError("Agent not found")
         
         try:
-            # Create the LangGraph agent based on configuration
-            langgraph_agent = self._create_langgraph_agent(agent)
+            # Use session_id if provided (session-based), otherwise use agent_id (persistent)
+            user_id = session_id if session_id else f"agent_{agent_id}"
+            
+            # Retrieve relevant memories from mem0 if enabled
+            memory_context = ""
+            if self.memory_service.is_enabled():
+                try:
+                    memories = self.memory_service.search_memory(
+                        query=input_text,
+                        user_id=user_id,
+                        agent_id=agent_id,
+                        top_k=5,  # Increased from 3 to 5 for more context
+                        llm_provider=agent.llm_provider,
+                        llm_model=agent.llm_model
+                    )
+                    
+                    # Build memory context string
+                    if memories:
+                        memory_context = "\nRelevant information from previous conversations:\n"
+                        for i, memory in enumerate(memories, 1):
+                            memory_content = memory.get('memory', '') if isinstance(memory, dict) else str(memory)
+                            memory_context += f"{i}. {memory_content}\n"
+                except Exception as mem_error:
+                    print(f"Error retrieving memory context: {mem_error}")
+            
+            # Create the LangGraph agent based on configuration with memory context
+            langgraph_agent = self._create_langgraph_agent(agent, memory_context)
+            
+            # Prepare messages with context from mem0 memory if enabled
+            messages = [HumanMessage(content=input_text)]
+            
+            # For ReAct agents, we'll add memory context to the system prompt
+            # For other agents, we'll handle it in their specific implementations
+            if agent.agent_type == "react":
+                # Add memory context to system prompt for ReAct agents
+                system_content = agent.system_prompt or "You are a helpful AI assistant."
+                if memory_context:
+                    system_content += f"\n\n{memory_context}"
+                # Enforce concise response style
+                system_content += "\n\nGuidelines: Keep responses concise (<=120 words). Use at most 5 bullet points. Ask at most one clarifying question only if necessary. Avoid long introductions."
+                messages.insert(0, SystemMessage(content=system_content))
             
             # Execute the agent with the appropriate input format based on agent type
             if agent.agent_type == "react":
                 # ReAct agents expect messages format
-                response = langgraph_agent.invoke({"messages": [HumanMessage(content=input_text)]})
+                response = langgraph_agent.invoke({"messages": messages})
             else:
                 # Other agents (plan-execute, reflection, custom) expect input format
-                response = langgraph_agent.invoke({"input": input_text})
+                # For these, we'll add the memory context to the input
+                enhanced_input = input_text
+                if memory_context:
+                    enhanced_input = f"{input_text}\n\nContext:\n{memory_context}"
+                
+                response = langgraph_agent.invoke({"input": enhanced_input})
             
             # Extract the final response
             # Handle different response formats
@@ -172,15 +253,17 @@ class AgentService:
             error_msg = str(e)
             print(f"Error executing agent {agent_id}: {error_msg}")
             
-            # Check for common API errors
-            if "API key" in error_msg or "401" in error_msg:
+            # Check for specific API key errors from LLM providers
+            if (("API key" in error_msg or "401" in error_msg) and 
+                ("OpenAI" in error_msg or "Anthropic" in error_msg or "Groq" in error_msg or "api_key" in error_msg.lower())):
                 raise ValueError("Invalid API key. Please check your API key configuration.")
-            elif "403" in error_msg:
+            elif "403" in error_msg and ("OpenAI" in error_msg or "Anthropic" in error_msg or "Groq" in error_msg):
                 raise ValueError("Access forbidden. Please check your API key permissions.")
-            elif "429" in error_msg:
+            elif "429" in error_msg and ("OpenAI" in error_msg or "Anthropic" in error_msg or "Groq" in error_msg):
                 raise ValueError("Rate limit exceeded. Please try again later.")
             else:
-                raise ValueError(f"Error communicating with the agent: {error_msg}")
+                # For non-API key errors, re-raise the original exception
+                raise e
     
     async def stream_agent(self, websocket, agent_id: str):
         """Stream agent responses via WebSocket"""
@@ -196,7 +279,7 @@ class AgentService:
         await websocket.send_text(json.dumps({"status": "Streaming not fully implemented in this example"}))
         await websocket.close()
     
-    def _create_langgraph_agent(self, agent_config: AgentInDB):
+    def _create_langgraph_agent(self, agent_config: AgentInDB, memory_context: str = ""):
         """Create a LangGraph agent based on the configuration"""
         # Decrypt the user API key if available
         user_api_key = None
@@ -218,11 +301,11 @@ class AgentService:
         if agent_config.agent_type == "react":
             return self._create_react_agent(llm, agent_config)
         elif agent_config.agent_type == "plan-execute":
-            return self._create_plan_execute_agent(llm, agent_config)
+            return self._create_plan_execute_agent(llm, agent_config, memory_context)
         elif agent_config.agent_type == "reflection":
-            return self._create_reflection_agent(llm, agent_config)
+            return self._create_reflection_agent(llm, agent_config, memory_context)
         else:  # custom
-            return self._create_custom_agent(llm, agent_config)
+            return self._create_custom_agent(llm, agent_config, memory_context)
     
     def _initialize_llm(self, provider: str, model: str, temperature: float, user_api_key: Optional[str] = None):
         """Initialize the LLM based on provider and user API key"""
@@ -240,19 +323,22 @@ class AgentService:
             return ChatOpenAI(
                 model=model,
                 temperature=temperature,
-                api_key=openai_api_key
+                api_key=openai_api_key,
+                max_tokens=300
             )
         elif provider == "anthropic" and anthropic_key_available:
             return ChatAnthropic(
                 model=model,
                 temperature=temperature,
-                anthropic_api_key=anthropic_api_key
+                anthropic_api_key=anthropic_api_key,
+                max_tokens=300
             )
         elif provider == "groq" and groq_key_available:
             return ChatGroq(
                 model=model,
                 temperature=temperature,
-                groq_api_key=groq_api_key
+                groq_api_key=groq_api_key,
+                max_tokens=300
             )
         # Add other providers as needed
         elif openai_key_available:
@@ -260,7 +346,8 @@ class AgentService:
             return ChatOpenAI(
                 model=model,
                 temperature=temperature,
-                api_key=openai_api_key
+                api_key=openai_api_key,
+                max_tokens=300
             )
         else:
             # Return a mock LLM that provides informative responses when no API key is available
@@ -377,7 +464,7 @@ class AgentService:
             # Compile without checkpointer
             return workflow.compile()
     
-    def _create_plan_execute_agent(self, llm, agent_config):
+    def _create_plan_execute_agent(self, llm, agent_config, memory_context: str = ""):
         """Create a generic Plan & Execute agent for complex multi-step tasks"""
         from langchain_core.prompts import PromptTemplate
         from langchain_core.output_parsers import StrOutputParser
@@ -396,9 +483,12 @@ class AgentService:
         def planner_node(state: PlanExecuteState):
             """Create a plan for executing the user request"""
             system_prompt = agent_config.system_prompt or "You are an expert at creating plans for complex tasks."
+            if memory_context:
+                system_prompt += f"\n\n{memory_context}"
+                
             planner_prompt = PromptTemplate.from_template(f"""{system_prompt}
             
-For the user request, create a detailed plan with steps. Each step should be a single actionable item.
+For the user request, create a SHORT plan of up to 5 steps. Each step must be a single actionable line. Be concise.
 
 User Request: {{input}}
 
@@ -412,12 +502,15 @@ Plan:""")
         def executor_node(state: PlanExecuteState):
             """Execute the plan steps"""
             system_prompt = agent_config.system_prompt or "You are an expert at executing plans."
+            if memory_context:
+                system_prompt += f"\n\n{memory_context}"
+                
             executor_prompt = PromptTemplate.from_template(f"""{system_prompt}
             
-Here is the plan to execute:
+Here is the plan to execute (concise execution, <=100 words):
 {{agent_plan}}
 
-Execute the next step and return the result.
+Execute the next step and return a brief result.
 
 Previous steps: {{past_steps}}
 
@@ -446,7 +539,7 @@ Next step result:""")
         # Compile without checkpointer
         return workflow.compile()
     
-    def _create_reflection_agent(self, llm, agent_config):
+    def _create_reflection_agent(self, llm, agent_config, memory_context: str = ""):
         """Create a generic Reflection agent that improves its responses through self-evaluation"""
         from langchain_core.prompts import PromptTemplate
         from langchain_core.output_parsers import StrOutputParser
@@ -463,9 +556,12 @@ Next step result:""")
         def agent_node(state: ReflectionState):
             """Generate initial response"""
             system_prompt = agent_config.system_prompt or "You are a helpful AI assistant."
+            if memory_context:
+                system_prompt += f"\n\n{memory_context}"
+                
             agent_prompt = PromptTemplate.from_template(f"""{system_prompt}
             
-Provide a response to the user request.
+Provide a concise response to the user request (<=120 words, up to 5 bullets if needed).
 
 User Request: {{input}}
 
@@ -479,9 +575,12 @@ Response:""")
         def critique_node(state: ReflectionState):
             """Critique the initial response"""
             system_prompt = agent_config.system_prompt or "You are an expert reviewer."
+            if memory_context:
+                system_prompt += f"\n\n{memory_context}"
+                
             critique_prompt = PromptTemplate.from_template(f"""{system_prompt}
             
-Review the following response for quality, accuracy, and completeness. Point out any issues or improvements.
+Review the following response for quality, accuracy, and unnecessary verbosity. Suggest how to make it shorter while preserving key information.
 
 Response: {{agent_draft}}
 
@@ -497,9 +596,12 @@ Critique:""")
         def revision_node(state: ReflectionState):
             """Revise the response based on critique"""
             system_prompt = agent_config.system_prompt or "You are an expert editor."
+            if memory_context:
+                system_prompt += f"\n\n{memory_context}"
+                
             revision_prompt = PromptTemplate.from_template(f"""{system_prompt}
             
-Improve the response based on the critique.
+Improve the response based on the critique. Make it concise (<=120 words) and to the point.
 
 Original Response: {{agent_draft}}
 
@@ -534,7 +636,7 @@ Improved Response:""")
         # Compile without checkpointer
         return workflow.compile()
     
-    def _create_custom_agent(self, llm, agent_config):
+    def _create_custom_agent(self, llm, agent_config, memory_context: str = ""):
         """Create a flexible custom agent graph for specialized workflows"""
         from langchain_core.prompts import PromptTemplate
         from langchain_core.output_parsers import StrOutputParser
@@ -551,9 +653,12 @@ Improved Response:""")
         def analysis_node(state: CustomAgentState):
             """Analyze the user request and determine the approach"""
             system_prompt = agent_config.system_prompt or "You are a helpful assistant."
+            if memory_context:
+                system_prompt += f"\n\n{memory_context}"
+                
             analysis_prompt = PromptTemplate.from_template(f"""{system_prompt}
             
-You are an expert problem analyzer. Analyze the following user request and determine the best approach to address it.
+You are an expert problem analyzer. Provide a brief analysis (3-5 bullet points max).
 
 User Request: {{input}}
 
@@ -567,9 +672,12 @@ Analysis:""")
         def action_node(state: CustomAgentState):
             """Take action based on analysis"""
             system_prompt = agent_config.system_prompt or "You are a helpful assistant."
+            if memory_context:
+                system_prompt += f"\n\n{memory_context}"
+                
             action_prompt = PromptTemplate.from_template(f"""{system_prompt}
             
-You are an expert problem solver. Based on the analysis, determine the best action to take to address the user request.
+You are an expert problem solver. Based on the analysis, determine the best action. Keep it brief (<=80 words).
 
 Analysis: {{agent_analysis}}
 
@@ -585,9 +693,12 @@ Action:""")
         def result_node(state: CustomAgentState):
             """Format the final result"""
             system_prompt = agent_config.system_prompt or "You are a helpful assistant."
+            if memory_context:
+                system_prompt += f"\n\n{memory_context}"
+                
             result_prompt = PromptTemplate.from_template(f"""{system_prompt}
             
-Provide a clear, comprehensive response to the user's request based on the action taken.
+Provide a clear, concise response to the user's request based on the action taken (<=120 words, up to 5 bullets).
 
 Action Taken: {{agent_action}}
 
