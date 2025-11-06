@@ -9,7 +9,7 @@ import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Sparkles, Cpu, Database, GitBranch, Settings2, Thermometer, Hash, Layers, Box, FileText, Key, MessageSquare } from "lucide-react";
+import { Sparkles, Cpu, Database, GitBranch, Settings2, Thermometer, Hash, Layers, Box, FileText, Key, MessageSquare, Upload, Link2, Type, Brain } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { AgentList } from "@/components/AgentList";
@@ -127,19 +127,30 @@ const MEMORY_TYPES = [
   { value: "none", label: "No Persistence" },
 ];
 
-const AVAILABLE_TOOLS = [
-  { id: "tavily_search", label: "Tavily Search" },
-  { id: "python_repl", label: "Python REPL" },
-  { id: "arxiv", label: "arXiv Papers" },
-  { id: "wikipedia", label: "Wikipedia" },
-  { id: "duckduckgo", label: "DuckDuckGo" },
-  { id: "human_approval", label: "Human Approval" },
+const AGENT_FRAMEWORKS = [
+  { value: "langgraph", label: "LangGraph" },
+  { value: "crewai", label: "CrewAI" },
+  { value: "autogen", label: "AutoGen" },
+  { value: "google-adk", label: "Google ADK" },
+  { value: "semantic-kernel", label: "Semantic Kernel" },
+];
+
+const MCP_SERVERS = [
+  { id: "mcp_filesystem", label: "Filesystem" },
+  { id: "mcp_github", label: "GitHub" },
+  { id: "mcp_postgres", label: "PostgreSQL" },
+  { id: "mcp_web_search", label: "Web Search" },
+  { id: "mcp_slack", label: "Slack" },
+  { id: "mcp_brave_search", label: "Brave Search" },
+  { id: "mcp_google_maps", label: "Google Maps" },
+  { id: "mcp_memory", label: "Memory" },
 ];
 
 export function AgentBuilder() {
   const navigate = useNavigate();
   const [agentName, setAgentName] = useState("");
   const [agentType, setAgentType] = useState("react");
+  const [agentFramework, setAgentFramework] = useState("langgraph");
   const [llmProvider, setLlmProvider] = useState("anthropic");
   const [llmModel, setLlmModel] = useState("claude-sonnet-4-5");
   const [apiKey, setApiKey] = useState("");
@@ -151,6 +162,9 @@ export function AgentBuilder() {
   const [streamingEnabled, setStreamingEnabled] = useState(true);
   const [humanInLoop, setHumanInLoop] = useState(false);
   const [recursionLimit, setRecursionLimit] = useState("25");
+  const [knowledgeText, setKnowledgeText] = useState("");
+  const [knowledgeLinks, setKnowledgeLinks] = useState("");
+  const [knowledgeMode, setKnowledgeMode] = useState<"upload" | "links" | "text">("text");
 
   const handleProviderChange = (provider: string) => {
     setLlmProvider(provider);
@@ -345,7 +359,7 @@ export function AgentBuilder() {
                 <Settings2 className="w-4 h-4 text-muted-foreground" />
                 <h3 className="text-sm font-medium">Agent Configuration</h3>
               </div>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-3 gap-4">
                 <div>
                   <div className="flex items-center gap-1.5 mb-2">
                     <Box className="w-3.5 h-3.5 text-muted-foreground" />
@@ -377,33 +391,135 @@ export function AgentBuilder() {
                     </SelectContent>
                   </Select>
                 </div>
+                <div>
+                  <div className="flex items-center gap-1.5 mb-2">
+                    <Brain className="w-3.5 h-3.5 text-muted-foreground" />
+                    <Label htmlFor="agent-framework" className="text-xs text-muted-foreground">Framework</Label>
+                  </div>
+                  <Select value={agentFramework} onValueChange={setAgentFramework}>
+                    <SelectTrigger id="agent-framework" className="h-9 bg-background">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {AGENT_FRAMEWORKS.map(framework => (
+                        <SelectItem key={framework.value} value={framework.value}>
+                          {framework.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
             </div>
 
-            {/* Tools */}
+            {/* MCP Servers */}
             <div className="border border-border rounded-lg p-5 bg-card">
               <div className="flex items-center gap-2 mb-4">
                 <GitBranch className="w-4 h-4 text-muted-foreground" />
-                <h3 className="text-sm font-medium">Tools</h3>
+                <h3 className="text-sm font-medium">MCP Servers</h3>
+                <span className="text-xs text-muted-foreground ml-auto">Model Context Protocol</span>
               </div>
-              <div className="grid grid-cols-3 gap-3">
-                {AVAILABLE_TOOLS.map(tool => (
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+                {MCP_SERVERS.map(server => (
                   <div
-                    key={tool.id}
+                    key={server.id}
                     className="flex items-center space-x-2 p-2.5 rounded-md border border-border bg-background hover:bg-muted transition-colors cursor-pointer"
-                    onClick={() => handleToolToggle(tool.id)}
+                    onClick={() => handleToolToggle(server.id)}
                   >
                     <Checkbox
-                      id={tool.id}
-                      checked={selectedTools.includes(tool.id)}
-                      onCheckedChange={() => handleToolToggle(tool.id)}
+                      id={server.id}
+                      checked={selectedTools.includes(server.id)}
+                      onCheckedChange={() => handleToolToggle(server.id)}
                     />
-                    <label htmlFor={tool.id} className="text-xs cursor-pointer flex-1">
-                      {tool.label}
+                    <label htmlFor={server.id} className="text-xs cursor-pointer flex-1 leading-tight">
+                      {server.label}
                     </label>
                   </div>
                 ))}
               </div>
+            </div>
+
+            {/* Knowledge Base */}
+            <div className="border border-border rounded-lg p-5 bg-card">
+              <div className="flex items-center gap-2 mb-4">
+                <Database className="w-4 h-4 text-muted-foreground" />
+                <h3 className="text-sm font-medium">Knowledge Base</h3>
+              </div>
+              
+              <div className="flex gap-2 mb-4">
+                <Button
+                  type="button"
+                  variant={knowledgeMode === "text" ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => setKnowledgeMode("text")}
+                  className="flex-1"
+                >
+                  <Type className="w-3.5 h-3.5 mr-1.5" />
+                  Text
+                </Button>
+                <Button
+                  type="button"
+                  variant={knowledgeMode === "links" ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => setKnowledgeMode("links")}
+                  className="flex-1"
+                >
+                  <Link2 className="w-3.5 h-3.5 mr-1.5" />
+                  Links
+                </Button>
+                <Button
+                  type="button"
+                  variant={knowledgeMode === "upload" ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => setKnowledgeMode("upload")}
+                  className="flex-1"
+                >
+                  <Upload className="w-3.5 h-3.5 mr-1.5" />
+                  Upload
+                </Button>
+              </div>
+
+              {knowledgeMode === "text" && (
+                <div>
+                  <Label htmlFor="knowledge-text" className="text-xs text-muted-foreground mb-2 block">
+                    Paste your text or documentation
+                  </Label>
+                  <Textarea
+                    id="knowledge-text"
+                    placeholder="Add context, documentation, or any information the agent should know..."
+                    value={knowledgeText}
+                    onChange={(e) => setKnowledgeText(e.target.value)}
+                    className="min-h-[100px] bg-background resize-none text-sm"
+                  />
+                </div>
+              )}
+
+              {knowledgeMode === "links" && (
+                <div>
+                  <Label htmlFor="knowledge-links" className="text-xs text-muted-foreground mb-2 block">
+                    Add URLs (one per line)
+                  </Label>
+                  <Textarea
+                    id="knowledge-links"
+                    placeholder="https://docs.example.com&#x0A;https://github.com/repo&#x0A;https://blog.example.com/article"
+                    value={knowledgeLinks}
+                    onChange={(e) => setKnowledgeLinks(e.target.value)}
+                    className="min-h-[100px] bg-background resize-none text-sm font-mono"
+                  />
+                </div>
+              )}
+
+              {knowledgeMode === "upload" && (
+                <div className="border-2 border-dashed border-border rounded-lg p-6 bg-background hover:bg-muted/50 transition-colors cursor-pointer">
+                  <div className="flex flex-col items-center justify-center gap-2 text-center">
+                    <Upload className="w-8 h-8 text-muted-foreground" />
+                    <div>
+                      <p className="text-sm font-medium">Click to upload documents</p>
+                      <p className="text-xs text-muted-foreground mt-1">PDF, TXT, MD, DOCX (max 10MB)</p>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 
