@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -165,6 +165,8 @@ export function AgentBuilder() {
   const [knowledgeText, setKnowledgeText] = useState("");
   const [knowledgeLinks, setKnowledgeLinks] = useState("");
   const [knowledgeMode, setKnowledgeMode] = useState<"upload" | "links" | "text">("text");
+  const [knowledgeFiles, setKnowledgeFiles] = useState<File[]>([]);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const handleProviderChange = (provider: string) => {
     setLlmProvider(provider);
@@ -217,6 +219,70 @@ export function AgentBuilder() {
       if (response.ok) {
         const agent = await response.json();
         console.log("Agent created successfully:", agent);
+        
+        // Create knowledge base if any knowledge is provided (text, links, or files)
+        if (knowledgeText || knowledgeLinks || knowledgeFiles.length > 0) {
+          try {
+            // Create knowledge base
+            const kbResponse = await fetch('http://localhost:8001/api/v1/knowledge-bases/', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                agent_id: agent.agent_id,
+                name: `${agentName} Knowledge Base`,
+                description: `Knowledge base for ${agentName}`,
+              }),
+            });
+
+            if (kbResponse.ok) {
+              const kb = await kbResponse.json();
+              
+              // Add text documents (if provided)
+              if (knowledgeText) {
+                const formData = new FormData();
+                formData.append('text', knowledgeText);
+                
+                await fetch(`http://localhost:8001/api/v1/knowledge-bases/${kb.kb_id}/documents/text`, {
+                  method: 'POST',
+                  body: formData,
+                });
+              }
+              
+              // Add URL documents (if provided)
+              if (knowledgeLinks) {
+                const urls = knowledgeLinks.split('\n').filter(url => url.trim());
+                for (const url of urls) {
+                  const formData = new FormData();
+                  formData.append('url', url.trim());
+                  
+                  await fetch(`http://localhost:8001/api/v1/knowledge-bases/${kb.kb_id}/documents/url`, {
+                    method: 'POST',
+                    body: formData,
+                  });
+                }
+              }
+
+              // Upload files (if provided)
+              if (knowledgeFiles.length > 0) {
+                for (const file of knowledgeFiles) {
+                  const formData = new FormData();
+                  formData.append('file', file);
+                  await fetch(`http://localhost:8001/api/v1/knowledge-bases/${kb.kb_id}/documents/file`, {
+                    method: 'POST',
+                    body: formData,
+                  });
+                }
+              }
+              
+              console.log("Knowledge base created successfully:", kb);
+            }
+          } catch (kbError) {
+            console.error("Error creating knowledge base:", kbError);
+          }
+        }
+        
         toast({
           title: "Agent Created! 🎉",
           description: `${agentName} configured with ${agentType} architecture and ID: ${agent.agent_id}`,
@@ -225,6 +291,9 @@ export function AgentBuilder() {
         setAgentName("");
         setSystemPrompt("");
         setSelectedTools([]);
+        setKnowledgeText("");
+        setKnowledgeLinks("");
+        setKnowledgeFiles([]);
       } else {
         const error = await response.json();
         throw new Error(error.detail || 'Failed to create agent');
@@ -510,14 +579,35 @@ export function AgentBuilder() {
               )}
 
               {knowledgeMode === "upload" && (
-                <div className="border-2 border-dashed border-border rounded-lg p-6 bg-background hover:bg-muted/50 transition-colors cursor-pointer">
-                  <div className="flex flex-col items-center justify-center gap-2 text-center">
-                    <Upload className="w-8 h-8 text-muted-foreground" />
-                    <div>
-                      <p className="text-sm font-medium">Click to upload documents</p>
-                      <p className="text-xs text-muted-foreground mt-1">PDF, TXT, MD, DOCX (max 10MB)</p>
+                <div>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    multiple
+                    accept=".pdf,.docx,.txt,.md,.html,.htm"
+                    className="hidden"
+                    onChange={(e) => {
+                      const files = e.target.files ? Array.from(e.target.files) : [];
+                      setKnowledgeFiles(files);
+                    }}
+                  />
+                  <div
+                    className="border-2 border-dashed border-border rounded-lg p-6 bg-background hover:bg-muted/50 transition-colors cursor-pointer"
+                    onClick={() => fileInputRef.current?.click()}
+                  >
+                    <div className="flex flex-col items-center justify-center gap-2 text-center">
+                      <Upload className="w-8 h-8 text-muted-foreground" />
+                      <div>
+                        <p className="text-sm font-medium">Click to select files</p>
+                        <p className="text-xs text-muted-foreground mt-1">PDF, DOCX, TXT, MD, HTML</p>
+                      </div>
                     </div>
                   </div>
+                  {knowledgeFiles.length > 0 && (
+                    <div className="mt-3 text-xs text-muted-foreground">
+                      {knowledgeFiles.length} file(s) selected: {knowledgeFiles.map(f => f.name).join(", ")}
+                    </div>
+                  )}
                 </div>
               )}
             </div>

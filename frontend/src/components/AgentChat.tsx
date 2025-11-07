@@ -192,6 +192,7 @@ export function AgentChat() {
     };
 
     setMessages((prev) => [...prev, userMessage]);
+    const messageToSend = input;  // Capture input before clearing
     setInput("");
     setIsLoading(true);
 
@@ -209,7 +210,7 @@ export function AgentChat() {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({ 
-          message: input,
+          message: messageToSend,
           thread_id: threadId
         }),
         signal: controller.signal,
@@ -225,14 +226,16 @@ export function AgentChat() {
         };
         setMessages((prev) => [...prev, assistantMessage]);
       } else {
-        throw new Error('Failed to get response');
+        const errorData = await response.json().catch(() => ({ detail: 'Unknown error' }));
+        throw new Error(errorData.detail || 'Failed to get response');
       }
     } catch (error: any) {
       if (error?.name !== 'AbortError') {
         console.error("Error sending message:", error);
+        const errorMessage = error?.message || "Failed to send message. Make sure the backend is running.";
         toast({
           title: "Error",
-          description: "Failed to send message. Make sure the backend is running.",
+          description: errorMessage,
           variant: "destructive",
         });
       }

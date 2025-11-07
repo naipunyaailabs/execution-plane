@@ -184,6 +184,26 @@ class AgentService:
                 except Exception as mem_error:
                     print(f"Error retrieving memory context: {mem_error}")
             
+            # Retrieve knowledge base context with timeout
+            knowledge_context = ""
+            try:
+                import asyncio
+                from services.knowledge_base_service import KnowledgeBaseService
+                kb_service = KnowledgeBaseService(self.db)
+                # Add 10 second timeout for KB queries to prevent hanging
+                knowledge_context = await asyncio.wait_for(
+                    kb_service.query_agent_knowledge(agent_id, input_text, top_k=5),
+                    timeout=10.0
+                )
+                if knowledge_context:
+                    print(f"Retrieved KB context for agent {agent_id}: {len(knowledge_context)} chars")
+            except asyncio.TimeoutError:
+                print(f"Knowledge base query timed out for agent {agent_id}")
+            except Exception as kb_error:
+                print(f"Error retrieving knowledge base context: {kb_error}")
+                import traceback
+                traceback.print_exc()
+            
             # Create the LangGraph agent based on configuration with memory context
             langgraph_agent = self._create_langgraph_agent(agent, memory_context)
             
@@ -195,6 +215,8 @@ class AgentService:
             if agent.agent_type == "react":
                 # Add memory context to system prompt for ReAct agents
                 system_content = agent.system_prompt or "You are a helpful AI assistant."
+                if knowledge_context:
+                    system_content += f"\n\n{knowledge_context}"
                 if memory_context:
                     system_content += f"\n\n{memory_context}"
                 # Enforce concise response style
@@ -202,17 +224,33 @@ class AgentService:
                 messages.insert(0, SystemMessage(content=system_content))
             
             # Execute the agent with the appropriate input format based on agent type
-            if agent.agent_type == "react":
-                # ReAct agents expect messages format
-                response = langgraph_agent.invoke({"messages": messages})
-            else:
-                # Other agents (plan-execute, reflection, custom) expect input format
-                # For these, we'll add the memory context to the input
-                enhanced_input = input_text
-                if memory_context:
-                    enhanced_input = f"{input_text}\n\nContext:\n{memory_context}"
-                
-                response = langgraph_agent.invoke({"input": enhanced_input})
+            # Add timeout to prevent hanging on slow LLM responses
+            import asyncio
+            try:
+                if agent.agent_type == "react":
+                    # ReAct agents expect messages format
+                    response = await asyncio.wait_for(
+                        asyncio.to_thread(langgraph_agent.invoke, {"messages": messages}),
+                        timeout=60.0  # 60 second timeout for LLM calls
+                    )
+                else:
+                    # Other agents (plan-execute, reflection, custom) expect input format
+                    # For these, we'll add the memory context to the input
+                    enhanced_input = input_text
+                    if knowledge_context or memory_context:
+                        context_parts = []
+                        if knowledge_context:
+                            context_parts.append(knowledge_context)
+                        if memory_context:
+                            context_parts.append(memory_context)
+                        enhanced_input = f"{input_text}\n\nContext:\n" + "\n\n".join(context_parts)
+                    
+                    response = await asyncio.wait_for(
+                        asyncio.to_thread(langgraph_agent.invoke, {"input": enhanced_input}),
+                        timeout=60.0
+                    )
+            except asyncio.TimeoutError:
+                raise ValueError("Agent response timed out. The LLM provider may be slow or unreachable. Please try again.")
             
             # Extract the final response
             # Handle different response formats

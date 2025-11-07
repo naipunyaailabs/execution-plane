@@ -1,7 +1,7 @@
 fastapi==0.104.1
 uvicorn[standard]==0.24.0
 python-dotenv==1.0.0
-sqlalchemy==2.0.23
+sqlalchemy==2.0.31
 pydantic==2.10.6
 python-multipart==0.0.6
 cryptography==46.0.3
@@ -12,7 +12,16 @@ langgraph==0.2.20
 langchain-openai==0.2.0
 langchain-anthropic==0.2.0
 langchain-groq==0.2.0
+langchain-community==0.3.0
 pydantic-settings==2.11.0
 qdrant-client==1.12.2
-mem0ai
+mem0ai==1.0.0
 ollama==0.6.0
+langchain-text-splitters==0.3.0
+pypdf==5.1.0
+python-docx==1.1.2
+docx2txt==0.8
+beautifulsoup4==4.12.3
+requests==2.32.3
+aiohttp==3.11.11
+unstructured==0.16.15

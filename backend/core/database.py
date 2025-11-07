@@ -12,6 +12,9 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
 async def init_db():
+    from models import agent
+    from models import knowledge_base
+    
     # Create tables
     Base.metadata.create_all(bind=engine)
     
