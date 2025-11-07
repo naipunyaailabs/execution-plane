@@ -9,7 +9,7 @@ import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Sparkles, Cpu, Database, GitBranch, Settings2, Thermometer, Hash, Layers, Box, FileText, Key, MessageSquare, Upload, Link2, Type, Brain, Wrench, Shield } from "lucide-react";
+import { Sparkles, Cpu, Database, GitBranch, Settings2, Thermometer, Hash, Layers, Box, FileText, Key, MessageSquare, Upload, Link2, Type, Brain, Wrench, Shield, Plus, X } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { AgentList } from "@/components/AgentList";
@@ -192,6 +192,10 @@ export function AgentBuilder() {
   const [knowledgeFiles, setKnowledgeFiles] = useState<File[]>([]);
   const [selectedToolsList, setSelectedToolsList] = useState<string[]>([]);
   const [allowedPII, setAllowedPII] = useState<string[]>([]);
+  const [customPII, setCustomPII] = useState<Array<{ id: string; label: string; description: string }>>([]);
+  const [newPIILabel, setNewPIILabel] = useState("");
+  const [newPIIDescription, setNewPIIDescription] = useState("");
+  const [showCustomPIIForm, setShowCustomPIIForm] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const handleProviderChange = (provider: string) => {
@@ -221,6 +225,34 @@ export function AgentBuilder() {
         ? prev.filter(id => id !== piiId)
         : [...prev, piiId]
     );
+  };
+
+  const handleAddCustomPII = () => {
+    if (!newPIILabel.trim()) {
+      toast({
+        title: "Label required",
+        description: "Please provide a label for the custom PII category",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const customId = `pii_custom_${Date.now()}`;
+    setCustomPII(prev => [
+      ...prev,
+      {
+        id: customId,
+        label: newPIILabel.trim(),
+        description: newPIIDescription.trim() || "Custom PII category"
+      }
+    ]);
+    setNewPIILabel("");
+    setNewPIIDescription("");
+    setShowCustomPIIForm(false);
+    toast({
+      title: "Custom PII Added",
+      description: `${newPIILabel} has been added to PII controls`,
+    });
   };
 
   const handleGenerateAgent = async () => {
@@ -691,6 +723,7 @@ export function AgentBuilder() {
               <p className="text-xs text-muted-foreground mb-4">
                 Select which Personally Identifiable Information (PII) categories can be sent to the agent
               </p>
+              
               <div className="space-y-2 max-h-[280px] overflow-y-auto pr-1">
                 {PII_CATEGORIES.map(pii => (
                   <div
@@ -714,7 +747,102 @@ export function AgentBuilder() {
                     </div>
                   </div>
                 ))}
+                
+                {customPII.map(pii => (
+                  <div
+                    key={pii.id}
+                    className="flex items-start space-x-3 p-3 rounded-md border border-primary/50 bg-primary/5 hover:bg-primary/10 transition-colors cursor-pointer"
+                    onClick={() => handlePIIToggle(pii.id)}
+                  >
+                    <Checkbox
+                      id={pii.id}
+                      checked={allowedPII.includes(pii.id)}
+                      onCheckedChange={() => handlePIIToggle(pii.id)}
+                      className="mt-0.5"
+                    />
+                    <div className="flex-1 min-w-0">
+                      <label htmlFor={pii.id} className="text-xs font-medium cursor-pointer block">
+                        {pii.label}
+                      </label>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        {pii.description}
+                      </p>
+                    </div>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setCustomPII(prev => prev.filter(p => p.id !== pii.id));
+                        setAllowedPII(prev => prev.filter(id => id !== pii.id));
+                      }}
+                      className="text-muted-foreground hover:text-destructive transition-colors"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                ))}
               </div>
+
+              {showCustomPIIForm ? (
+                <div className="mt-4 p-4 border border-border rounded-lg bg-background space-y-3">
+                  <div>
+                    <Label htmlFor="custom-pii-label" className="text-xs text-muted-foreground mb-1.5 block">
+                      PII Category Name
+                    </Label>
+                    <Input
+                      id="custom-pii-label"
+                      placeholder="e.g., License Number"
+                      value={newPIILabel}
+                      onChange={(e) => setNewPIILabel(e.target.value)}
+                      className="h-9 bg-card"
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="custom-pii-desc" className="text-xs text-muted-foreground mb-1.5 block">
+                      Description (Optional)
+                    </Label>
+                    <Input
+                      id="custom-pii-desc"
+                      placeholder="e.g., Driver's license numbers"
+                      value={newPIIDescription}
+                      onChange={(e) => setNewPIIDescription(e.target.value)}
+                      className="h-9 bg-card"
+                    />
+                  </div>
+                  <div className="flex gap-2">
+                    <Button
+                      type="button"
+                      size="sm"
+                      onClick={handleAddCustomPII}
+                      className="flex-1"
+                    >
+                      Add Category
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        setShowCustomPIIForm(false);
+                        setNewPIILabel("");
+                        setNewPIIDescription("");
+                      }}
+                    >
+                      Cancel
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setShowCustomPIIForm(true)}
+                  className="mt-4 w-full"
+                >
+                  <Plus className="w-3.5 h-3.5 mr-1.5" />
+                  Add Custom PII Category
+                </Button>
+              )}
             </div>
           </div>
 
