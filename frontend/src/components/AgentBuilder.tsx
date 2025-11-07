@@ -9,7 +9,7 @@ import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Sparkles, Cpu, Database, GitBranch, Settings2, Thermometer, Hash, Layers, Box, FileText, Key, MessageSquare, Upload, Link2, Type, Brain } from "lucide-react";
+import { Sparkles, Cpu, Database, GitBranch, Settings2, Thermometer, Hash, Layers, Box, FileText, Key, MessageSquare, Upload, Link2, Type, Brain, Wrench, Shield } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { AgentList } from "@/components/AgentList";
@@ -146,6 +146,30 @@ const MCP_SERVERS = [
   { id: "mcp_memory", label: "Memory" },
 ];
 
+const TOOLS = [
+  { id: "web_search", label: "Web Search" },
+  { id: "code_interpreter", label: "Code Interpreter" },
+  { id: "file_browser", label: "File Browser" },
+  { id: "calculator", label: "Calculator" },
+  { id: "api_caller", label: "API Caller" },
+  { id: "database_query", label: "Database Query" },
+  { id: "email_sender", label: "Email Sender" },
+  { id: "web_scraper", label: "Web Scraper" },
+];
+
+const PII_CATEGORIES = [
+  { id: "pii_email", label: "Email Addresses", description: "User email addresses" },
+  { id: "pii_phone", label: "Phone Numbers", description: "Phone contact information" },
+  { id: "pii_name", label: "Full Names", description: "First and last names" },
+  { id: "pii_address", label: "Physical Address", description: "Street, city, state, ZIP" },
+  { id: "pii_ssn", label: "SSN/Tax ID", description: "Social security numbers" },
+  { id: "pii_dob", label: "Date of Birth", description: "Birth dates and age" },
+  { id: "pii_financial", label: "Financial Data", description: "Credit cards, bank accounts" },
+  { id: "pii_medical", label: "Medical Records", description: "Health information" },
+  { id: "pii_ip", label: "IP Addresses", description: "Network identifiers" },
+  { id: "pii_biometric", label: "Biometric Data", description: "Fingerprints, facial data" },
+];
+
 export function AgentBuilder() {
   const navigate = useNavigate();
   const [agentName, setAgentName] = useState("");
@@ -166,6 +190,8 @@ export function AgentBuilder() {
   const [knowledgeLinks, setKnowledgeLinks] = useState("");
   const [knowledgeMode, setKnowledgeMode] = useState<"upload" | "links" | "text">("text");
   const [knowledgeFiles, setKnowledgeFiles] = useState<File[]>([]);
+  const [selectedToolsList, setSelectedToolsList] = useState<string[]>([]);
+  const [allowedPII, setAllowedPII] = useState<string[]>([]);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const handleProviderChange = (provider: string) => {
@@ -178,6 +204,22 @@ export function AgentBuilder() {
       prev.includes(toolId)
         ? prev.filter(id => id !== toolId)
         : [...prev, toolId]
+    );
+  };
+
+  const handleToolsToggle = (toolId: string) => {
+    setSelectedToolsList(prev =>
+      prev.includes(toolId)
+        ? prev.filter(id => id !== toolId)
+        : [...prev, toolId]
+    );
+  };
+
+  const handlePIIToggle = (piiId: string) => {
+    setAllowedPII(prev =>
+      prev.includes(piiId)
+        ? prev.filter(id => id !== piiId)
+        : [...prev, piiId]
     );
   };
 
@@ -508,6 +550,33 @@ export function AgentBuilder() {
               </div>
             </div>
 
+            {/* Tools */}
+            <div className="border border-border rounded-lg p-5 bg-card">
+              <div className="flex items-center gap-2 mb-4">
+                <Wrench className="w-4 h-4 text-muted-foreground" />
+                <h3 className="text-sm font-medium">Tools</h3>
+                <span className="text-xs text-muted-foreground ml-auto">Agent Capabilities</span>
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+                {TOOLS.map(tool => (
+                  <div
+                    key={tool.id}
+                    className="flex items-center space-x-2 p-2.5 rounded-md border border-border bg-background hover:bg-muted transition-colors cursor-pointer"
+                    onClick={() => handleToolsToggle(tool.id)}
+                  >
+                    <Checkbox
+                      id={tool.id}
+                      checked={selectedToolsList.includes(tool.id)}
+                      onCheckedChange={() => handleToolsToggle(tool.id)}
+                    />
+                    <label htmlFor={tool.id} className="text-xs cursor-pointer flex-1 leading-tight">
+                      {tool.label}
+                    </label>
+                  </div>
+                ))}
+              </div>
+            </div>
+
             {/* Knowledge Base */}
             <div className="border border-border rounded-lg p-5 bg-card">
               <div className="flex items-center gap-2 mb-4">
@@ -610,6 +679,42 @@ export function AgentBuilder() {
                   )}
                 </div>
               )}
+            </div>
+
+            {/* PII Configuration */}
+            <div className="border border-border rounded-lg p-5 bg-card">
+              <div className="flex items-center gap-2 mb-4">
+                <Shield className="w-4 h-4 text-muted-foreground" />
+                <h3 className="text-sm font-medium">PII Controls</h3>
+                <span className="text-xs text-muted-foreground ml-auto">Privacy Settings</span>
+              </div>
+              <p className="text-xs text-muted-foreground mb-4">
+                Select which Personally Identifiable Information (PII) categories can be sent to the agent
+              </p>
+              <div className="space-y-2 max-h-[280px] overflow-y-auto pr-1">
+                {PII_CATEGORIES.map(pii => (
+                  <div
+                    key={pii.id}
+                    className="flex items-start space-x-3 p-3 rounded-md border border-border bg-background hover:bg-muted transition-colors cursor-pointer"
+                    onClick={() => handlePIIToggle(pii.id)}
+                  >
+                    <Checkbox
+                      id={pii.id}
+                      checked={allowedPII.includes(pii.id)}
+                      onCheckedChange={() => handlePIIToggle(pii.id)}
+                      className="mt-0.5"
+                    />
+                    <div className="flex-1 min-w-0">
+                      <label htmlFor={pii.id} className="text-xs font-medium cursor-pointer block">
+                        {pii.label}
+                      </label>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        {pii.description}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
 
