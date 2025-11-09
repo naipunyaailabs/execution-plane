@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     ALLOWED_ORIGINS: List[str] = ["http://localhost:8080", "http://localhost:5173"]
     
     # Database settings
-    DATABASE_URL: str = os.getenv("DATABASE_URL", "sqlite:///test.db")
+    DATABASE_URL: str = os.getenv("DATABASE_URL", "sqlite:///agents.db")
     
     # Security settings
     SECRET_KEY: str = os.getenv("SECRET_KEY", "default_secret_key_for_development_only")

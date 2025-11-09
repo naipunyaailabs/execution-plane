@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from datetime import datetime
 
 class AgentBase(BaseModel):
@@ -15,6 +15,7 @@ class AgentBase(BaseModel):
     streaming_enabled: bool
     human_in_loop: bool
     recursion_limit: int
+    pii_config: Optional[Dict[str, Any]] = None  # PII filtering configuration
 
 class AgentCreate(AgentBase):
     api_key: str  # This will be encrypted and stored
@@ -34,6 +35,27 @@ class AgentExecutionRequest(BaseModel):
 class AgentChatRequest(BaseModel):
     message: str
     thread_id: Optional[str] = None  # Session ID for ephemeral memory
+
+
+class AgentResponse(BaseModel):
+    """Response schema that excludes sensitive fields"""
+    agent_id: str
+    name: str
+    agent_type: str
+    llm_provider: str
+    llm_model: str
+    temperature: float
+    system_prompt: Optional[str] = ""
+    tools: List[str] = []
+    max_iterations: int
+    streaming_enabled: bool
+    human_in_loop: bool
+    recursion_limit: int
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
 
 
 class AgentExecutionResponse(BaseModel):

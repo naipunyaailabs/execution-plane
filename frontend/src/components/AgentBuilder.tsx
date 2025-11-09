@@ -191,11 +191,12 @@ export function AgentBuilder() {
   const [knowledgeMode, setKnowledgeMode] = useState<"upload" | "links" | "text">("text");
   const [knowledgeFiles, setKnowledgeFiles] = useState<File[]>([]);
   const [selectedToolsList, setSelectedToolsList] = useState<string[]>([]);
-  const [allowedPII, setAllowedPII] = useState<string[]>([]);
+  const [blockedPII, setBlockedPII] = useState<string[]>([]);
   const [customPII, setCustomPII] = useState<Array<{ id: string; label: string; description: string }>>([]);
   const [newPIILabel, setNewPIILabel] = useState("");
   const [newPIIDescription, setNewPIIDescription] = useState("");
   const [showCustomPIIForm, setShowCustomPIIForm] = useState(false);
+  const [piiStrategy, setPIIStrategy] = useState<"redact" | "mask" | "hash" | "block">("redact");
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const handleProviderChange = (provider: string) => {
@@ -220,7 +221,7 @@ export function AgentBuilder() {
   };
 
   const handlePIIToggle = (piiId: string) => {
-    setAllowedPII(prev =>
+    setBlockedPII(prev =>
       prev.includes(piiId)
         ? prev.filter(id => id !== piiId)
         : [...prev, piiId]
@@ -255,6 +256,29 @@ export function AgentBuilder() {
     });
   };
 
+  const generatePatternFromLabel = (label: string): string => {
+    const patterns: Record<string, string> = {
+      "employee id": "EMP-\\d{5}",
+      "badge number": "BDG-\\d{5}",
+      "customer id": "CUST-\\d{6}",
+      "order number": "ORD-\\d{8}",
+      "ticket number": "TKT-\\d{6}",
+      "license plate": "[A-Z]{3}-\\d{4}",
+      "patient id": "PAT-\\d{7}",
+      "student id": "STU-\\d{7}",
+      "member number": "MBR-\\d{9}",
+      "invoice number": "INV-\\d{6}",
+      "account number": "ACC-\\d{8}",
+      "policy number": "POL-\\d{9}",
+      "claim number": "CLM-\\d{7}",
+      "reference number": "REF-\\d{10}",
+      "tracking number": "TRK-\\d{12}"
+    };
+    
+    const normalizedLabel = label.toLowerCase().trim();
+    return patterns[normalizedLabel] || `${label.replace(/\s+/g, '-').toUpperCase()}-\\d{5}`;
+  };
+
   const handleGenerateAgent = async () => {
     if (!agentName.trim()) {
       toast({
@@ -263,6 +287,23 @@ export function AgentBuilder() {
         variant: "destructive",
       });
       return;
+    }
+
+    // Build PII configuration only if user selected something
+    let pii_config = null;
+    if (blockedPII.length > 0 || customPII.length > 0) {
+      pii_config = {
+        blocked_pii_types: blockedPII,
+        custom_pii_categories: customPII.map(pii => ({
+          id: pii.id,
+          label: pii.label,
+          description: pii.description,
+          pattern: generatePatternFromLabel(pii.label)
+        })),
+        strategy: piiStrategy,
+        apply_to_output: true,  // Always enable output filtering when PII types are selected
+        apply_to_tool_results: false
+      };
     }
 
     const config = {
@@ -279,10 +320,11 @@ export function AgentBuilder() {
       streaming_enabled: streamingEnabled,
       human_in_loop: humanInLoop,
       recursion_limit: parseInt(recursionLimit),
+      pii_config: pii_config
     };
 
     try {
-      const response = await fetch('http://localhost:8001/api/v1/agents/', {
+      const response = await fetch('http://localhost:8000/api/v1/agents/', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -298,7 +340,7 @@ export function AgentBuilder() {
         if (knowledgeText || knowledgeLinks || knowledgeFiles.length > 0) {
           try {
             // Create knowledge base
-            const kbResponse = await fetch('http://localhost:8001/api/v1/knowledge-bases/', {
+            const kbResponse = await fetch('http://localhost:8000/api/v1/knowledge-bases/', {
               method: 'POST',
               headers: {
                 'Content-Type': 'application/json',
@@ -318,7 +360,7 @@ export function AgentBuilder() {
                 const formData = new FormData();
                 formData.append('text', knowledgeText);
                 
-                await fetch(`http://localhost:8001/api/v1/knowledge-bases/${kb.kb_id}/documents/text`, {
+                await fetch(`http://localhost:8000/api/v1/knowledge-bases/${kb.kb_id}/documents/text`, {
                   method: 'POST',
                   body: formData,
                 });
@@ -331,7 +373,7 @@ export function AgentBuilder() {
                   const formData = new FormData();
                   formData.append('url', url.trim());
                   
-                  await fetch(`http://localhost:8001/api/v1/knowledge-bases/${kb.kb_id}/documents/url`, {
+                  await fetch(`http://localhost:8000/api/v1/knowledge-bases/${kb.kb_id}/documents/url`, {
                     method: 'POST',
                     body: formData,
                   });
@@ -343,7 +385,7 @@ export function AgentBuilder() {
                 for (const file of knowledgeFiles) {
                   const formData = new FormData();
                   formData.append('file', file);
-                  await fetch(`http://localhost:8001/api/v1/knowledge-bases/${kb.kb_id}/documents/file`, {
+                  await fetch(`http://localhost:8000/api/v1/knowledge-bases/${kb.kb_id}/documents/file`, {
                     method: 'POST',
                     body: formData,
                   });
@@ -368,6 +410,9 @@ export function AgentBuilder() {
         setKnowledgeText("");
         setKnowledgeLinks("");
         setKnowledgeFiles([]);
+        setBlockedPII([]);
+        setCustomPII([]);
+        setPIIStrategy("redact");
       } else {
         const error = await response.json();
         throw new Error(error.detail || 'Failed to create agent');
@@ -721,8 +766,24 @@ export function AgentBuilder() {
                 <span className="text-xs text-muted-foreground ml-auto">Privacy Settings</span>
               </div>
               <p className="text-xs text-muted-foreground mb-4">
-                Select which Personally Identifiable Information (PII) categories can be sent to the agent
+                Select which Personally Identifiable Information (PII) categories should be blocked/filtered from agent interactions. When PII types are selected, they will be filtered from user input, knowledge base content, conversation memory, and agent responses.
               </p>
+              
+              {/* PII Strategy Selection */}
+              <div className="mb-4 p-3 border border-border rounded-lg bg-background space-y-3">
+                <Label className="text-xs text-muted-foreground font-medium">PII Handling Strategy</Label>
+                <Select value={piiStrategy} onValueChange={(val) => setPIIStrategy(val as any)}>
+                  <SelectTrigger className="h-9 bg-card">
+                    <SelectValue placeholder="Select strategy" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="redact">Redact - Replace with [REDACTED_TYPE]</SelectItem>
+                    <SelectItem value="mask">Mask - Show last 4 characters (****1234)</SelectItem>
+                    <SelectItem value="hash">Hash - Deterministic hash</SelectItem>
+                    <SelectItem value="block">Block - Prevent request if PII detected</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
               
               <div className="space-y-2 max-h-[280px] overflow-y-auto pr-1">
                 {PII_CATEGORIES.map(pii => (
@@ -733,7 +794,7 @@ export function AgentBuilder() {
                   >
                     <Checkbox
                       id={pii.id}
-                      checked={allowedPII.includes(pii.id)}
+                      checked={blockedPII.includes(pii.id)}
                       onCheckedChange={() => handlePIIToggle(pii.id)}
                       className="mt-0.5"
                     />
@@ -756,7 +817,7 @@ export function AgentBuilder() {
                   >
                     <Checkbox
                       id={pii.id}
-                      checked={allowedPII.includes(pii.id)}
+                      checked={blockedPII.includes(pii.id)}
                       onCheckedChange={() => handlePIIToggle(pii.id)}
                       className="mt-0.5"
                     />
@@ -772,7 +833,7 @@ export function AgentBuilder() {
                       onClick={(e) => {
                         e.stopPropagation();
                         setCustomPII(prev => prev.filter(p => p.id !== pii.id));
-                        setAllowedPII(prev => prev.filter(id => id !== pii.id));
+                        setBlockedPII(prev => prev.filter(id => id !== pii.id));
                       }}
                       className="text-muted-foreground hover:text-destructive transition-colors"
                     >

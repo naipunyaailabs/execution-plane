@@ -53,7 +53,7 @@ export function AgentChat() {
     const cleanupSession = async () => {
       if (newThreadId) {
         try {
-          await fetch(`http://localhost:8001/api/v1/agents/memory/session/${newThreadId}`, {
+          await fetch(`http://localhost:8000/api/v1/agents/memory/session/${newThreadId}`, {
             method: 'DELETE',
           });
           console.log(`Session ${newThreadId} cleaned up`);
@@ -68,7 +68,7 @@ export function AgentChat() {
       // Use sendBeacon for reliable cleanup on page unload
       if (newThreadId) {
         navigator.sendBeacon(
-          `http://localhost:8001/api/v1/agents/memory/session/${newThreadId}`,
+          `http://localhost:8000/api/v1/agents/memory/session/${newThreadId}`,
         );
       }
     };
@@ -96,7 +96,7 @@ export function AgentChat() {
     const cleanupPrevSession = async () => {
       if (prevThreadId) {
         try {
-          await fetch(`http://localhost:8001/api/v1/agents/memory/session/${prevThreadId}`, {
+          await fetch(`http://localhost:8000/api/v1/agents/memory/session/${prevThreadId}`, {
             method: 'POST',
           });
           console.log(`Previous session ${prevThreadId} cleaned up on agent switch`);
@@ -126,7 +126,7 @@ export function AgentChat() {
 
   const fetchAgents = async () => {
     try {
-      const response = await fetch('http://localhost:8001/api/v1/agents/');
+      const response = await fetch('http://localhost:8000/api/v1/agents/');
       if (response.ok) {
         const data = await response.json();
         setAgents(data);
@@ -146,7 +146,7 @@ export function AgentChat() {
 
   const handleDeleteAgent = async (agentId: string, agentName: string) => {
     try {
-      const response = await fetch(`http://localhost:8001/api/v1/agents/${agentId}/`, {
+      const response = await fetch(`http://localhost:8000/api/v1/agents/${agentId}/`, {
         method: 'DELETE',
       });
 
@@ -204,7 +204,7 @@ export function AgentChat() {
     inFlightControllerRef.current = controller;
 
     try {
-      const response = await fetch(`http://localhost:8001/api/v1/agents/${selectedAgentId}/chat/`, {
+      const response = await fetch(`http://localhost:8000/api/v1/agents/${selectedAgentId}/chat/`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

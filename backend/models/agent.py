@@ -20,5 +20,6 @@ class Agent(Base):
     human_in_loop = Column(Boolean, default=False)
     recursion_limit = Column(Integer)
     api_key_encrypted = Column(String)  # Encrypted user API key
+    pii_config = Column(JSON)  # PII configuration: allowed types, custom categories, strategy
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())

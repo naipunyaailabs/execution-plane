@@ -17,6 +17,7 @@ import base64
 from cryptography.fernet import Fernet
 
 from services.memory_service import MemoryService
+from middleware.pii_middleware import create_pii_middleware_from_config, PIIMiddleware
 
 from models.agent import Agent as AgentModel
 from schemas.agent import AgentCreate, AgentInDB
@@ -72,7 +73,8 @@ class AgentService:
             streaming_enabled=agent_data.streaming_enabled,
             human_in_loop=agent_data.human_in_loop,
             recursion_limit=agent_data.recursion_limit,
-            api_key_encrypted=encrypted_api_key
+            api_key_encrypted=encrypted_api_key,
+            pii_config=agent_data.pii_config
         )
         
         self.db.add(db_agent)
@@ -109,8 +111,26 @@ class AgentService:
             # Use thread_id if provided (session-based), otherwise use agent_id (persistent)
             session_id = thread_id if thread_id else f"agent_{agent_id}"
             
+            # Get agent config to check for PII filtering
+            agent = await self.get_agent(agent_id)
+            if not agent:
+                raise ValueError("Agent not found")
+            
+            # Apply PII filtering to input if configured
+            filtered_message = message
+            if agent.pii_config:
+                pii_middleware = create_pii_middleware_from_config(agent.pii_config)
+                if pii_middleware:
+                    filtered_message = pii_middleware.process_message(message, message_type="input")
+            
             # Execute the agent and get response
-            response = await self.execute_agent(agent_id, message, session_id=session_id)
+            response = await self.execute_agent(agent_id, filtered_message, session_id=session_id)
+            
+            # Apply PII filtering to output if configured
+            if agent.pii_config:
+                pii_middleware = create_pii_middleware_from_config(agent.pii_config)
+                if pii_middleware:
+                    response = pii_middleware.process_message(response, message_type="output")
             
             # Store the interaction in mem0 memory if enabled
             # Store both user and assistant messages to preserve conversation context
@@ -158,6 +178,13 @@ class AgentService:
         if not agent:
             raise ValueError("Agent not found")
         
+        # Apply PII filtering to input if configured
+        filtered_input = input_text
+        if agent.pii_config:
+            pii_middleware = create_pii_middleware_from_config(agent.pii_config)
+            if pii_middleware:
+                filtered_input = pii_middleware.process_message(input_text, message_type="input")
+        
         try:
             # Use session_id if provided (session-based), otherwise use agent_id (persistent)
             user_id = session_id if session_id else f"agent_{agent_id}"
@@ -167,7 +194,7 @@ class AgentService:
             if self.memory_service.is_enabled():
                 try:
                     memories = self.memory_service.search_memory(
-                        query=input_text,
+                        query=filtered_input,
                         user_id=user_id,
                         agent_id=agent_id,
                         top_k=5,  # Increased from 3 to 5 for more context
@@ -181,6 +208,11 @@ class AgentService:
                         for i, memory in enumerate(memories, 1):
                             memory_content = memory.get('memory', '') if isinstance(memory, dict) else str(memory)
                             memory_context += f"{i}. {memory_content}\n"
+                        # Apply PII filtering to memory context before injecting into prompts
+                        if agent.pii_config:
+                            pii_middleware = create_pii_middleware_from_config(agent.pii_config)
+                            if pii_middleware:
+                                memory_context = pii_middleware.process_message(memory_context, message_type="output")
                 except Exception as mem_error:
                     print(f"Error retrieving memory context: {mem_error}")
             
@@ -192,9 +224,14 @@ class AgentService:
                 kb_service = KnowledgeBaseService(self.db)
                 # Add 10 second timeout for KB queries to prevent hanging
                 knowledge_context = await asyncio.wait_for(
-                    kb_service.query_agent_knowledge(agent_id, input_text, top_k=5),
+                    kb_service.query_agent_knowledge(agent_id, filtered_input, top_k=5),
                     timeout=10.0
                 )
+                # Apply PII filtering to knowledge base content before using it
+                if knowledge_context and agent.pii_config:
+                    pii_middleware = create_pii_middleware_from_config(agent.pii_config)
+                    if pii_middleware:
+                        knowledge_context = pii_middleware.process_message(knowledge_context, message_type="output")
                 if knowledge_context:
                     print(f"Retrieved KB context for agent {agent_id}: {len(knowledge_context)} chars")
             except asyncio.TimeoutError:
@@ -208,7 +245,7 @@ class AgentService:
             langgraph_agent = self._create_langgraph_agent(agent, memory_context)
             
             # Prepare messages with context from mem0 memory if enabled
-            messages = [HumanMessage(content=input_text)]
+            messages = [HumanMessage(content=filtered_input)]
             
             # For ReAct agents, we'll add memory context to the system prompt
             # For other agents, we'll handle it in their specific implementations
@@ -236,14 +273,14 @@ class AgentService:
                 else:
                     # Other agents (plan-execute, reflection, custom) expect input format
                     # For these, we'll add the memory context to the input
-                    enhanced_input = input_text
+                    enhanced_input = filtered_input
                     if knowledge_context or memory_context:
                         context_parts = []
                         if knowledge_context:
                             context_parts.append(knowledge_context)
                         if memory_context:
                             context_parts.append(memory_context)
-                        enhanced_input = f"{input_text}\n\nContext:\n" + "\n\n".join(context_parts)
+                        enhanced_input = f"{filtered_input}\n\nContext:\n" + "\n\n".join(context_parts)
                     
                     response = await asyncio.wait_for(
                         asyncio.to_thread(langgraph_agent.invoke, {"input": enhanced_input}),
