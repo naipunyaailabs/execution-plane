@@ -13,7 +13,10 @@ from collections import defaultdict
 from models.workflow import Workflow, WorkflowExecution, StepExecution
 from schemas.workflow import WorkflowCreate, WorkflowUpdate, WorkflowExecutionCreate, StepExecutionCreate
 from services.agent_service import AgentService
-
+from services.error_handler import ErrorHandler, RetryPolicy, DEFAULT_RETRY_POLICY
+from services.alerting_service import AlertingService
+from services.cost_tracking_service import CostTrackingService
+from services.langfuse_integration import LangfuseIntegration
 # Configure logging
 logger = logging.getLogger(__name__)
 
@@ -21,6 +24,7 @@ logger = logging.getLogger(__name__)
 class WorkflowService:
     def __init__(self, db: Session):
         self.db = db
+        self.langfuse = LangfuseIntegration()  # For workflow tracing
 
     async def create_workflow(self, workflow_data: WorkflowCreate, user_id: Optional[str] = None) -> Workflow:
         """Create a new workflow"""
@@ -31,7 +35,8 @@ class WorkflowService:
             name=workflow_data.name,
             description=workflow_data.description,
             definition=workflow_data.definition,
-            created_by=user_id
+            created_by=user_id,
+            version=1  # Initial version
         )
         
         self.db.add(db_workflow)
@@ -172,7 +177,7 @@ class WorkflowService:
         return db_step
 
     async def execute_workflow(self, workflow_id: str, input_data: Dict[str, Any]) -> WorkflowExecution:
-        """Execute a workflow with the given input"""
+        """Execute a workflow with the given input and Langfuse tracing"""
         # Get the workflow
         workflow = await self.get_workflow(workflow_id)
         if not workflow:
@@ -187,6 +192,14 @@ class WorkflowService:
         
         # Get the execution ID as a string
         execution_id = str(getattr(execution, 'execution_id'))
+        
+        # Create Langfuse trace for workflow execution
+        if self.langfuse.enabled:
+            trace = self.langfuse.trace_workflow_execution(
+                workflow_id=workflow_id,
+                execution_id=execution_id,
+                metadata={"input_data_keys": list(input_data.keys())}
+            )
         
         # Capture initial resource usage
         try:
@@ -240,11 +253,28 @@ class WorkflowService:
                 })
             
             # Update status to completed
-            await self.update_workflow_execution_status(execution_id, "completed", output_data)
+            execution = await self.update_workflow_execution_status(execution_id, "completed", output_data)
+            
+            # Evaluate alert rules for completed execution
+            if execution:
+                try:
+                    alerting_service = AlertingService(self.db)
+                    await alerting_service.evaluate_alert_rules(execution)
+                except Exception as alert_error:
+                    logger.warning(f"Error evaluating alert rules: {str(alert_error)}")
             
         except Exception as e:
             # Update status to failed
-            await self.update_workflow_execution_status(execution_id, "failed", error_message=str(e))
+            execution = await self.update_workflow_execution_status(execution_id, "failed", error_message=str(e))
+            
+            # Evaluate alert rules for failed execution
+            if execution:
+                try:
+                    alerting_service = AlertingService(self.db)
+                    await alerting_service.evaluate_alert_rules(execution)
+                except Exception as alert_error:
+                    logger.warning(f"Error evaluating alert rules: {str(alert_error)}")
+            
             raise e
             
         return await self.get_workflow_execution(execution_id)
@@ -396,10 +426,26 @@ class WorkflowService:
             # Prepare input for the agent based on step configuration
             agent_input = self._prepare_agent_input(step_definition, context, previous_results)
             
-            # Execute the agent
+            # Get retry policy from step definition or use default
+            retry_config = step_definition.get("retry_policy", {})
+            retry_policy = RetryPolicy(
+                max_retries=retry_config.get("max_retries", DEFAULT_RETRY_POLICY.max_retries),
+                initial_delay=retry_config.get("initial_delay", DEFAULT_RETRY_POLICY.initial_delay),
+                max_delay=retry_config.get("max_delay", DEFAULT_RETRY_POLICY.max_delay),
+                exponential_base=retry_config.get("exponential_base", DEFAULT_RETRY_POLICY.exponential_base)
+            )
+            
+            # Execute the agent with retry logic
             agent_service = AgentService(self.db)
             start_time = time.time()
-            agent_response = await agent_service.execute_agent(agent_id, str(agent_input))
+            
+            async def execute_agent_with_context():
+                return await agent_service.execute_agent(agent_id, str(agent_input))
+            
+            agent_response = await ErrorHandler.retry_with_backoff(
+                execute_agent_with_context,
+                retry_policy
+            )
             end_time = time.time()
             
             # Capture final resource metrics
@@ -444,15 +490,25 @@ class WorkflowService:
             return {step_id: agent_response}
             
         except Exception as e:
-            # Log error
-            logger.error(f"Step {step_id} failed with error: {str(e)}")
+            # Get detailed error information
+            error_details = ErrorHandler.get_error_details(e)
+            category = error_details["category"]
+            message = error_details["message"]
             
-            # Update step status to failed
+            # Log error with category
+            logger.error(
+                f"Step {step_id} failed with {category}: {message}. "
+                f"Error type: {error_details['error_type']}"
+            )
+            
+            # Update step status to failed with categorized error message
             await self.update_step_execution_status(
                 step_id, execution_id, "failed", 
-                error_message=str(e)
+                error_message=f"[{category.upper()}] {message}"
             )
-            raise e
+            
+            # Re-raise with better error message
+            raise Exception(f"Step {step_id} failed: {message}") from e
 
     def _prepare_agent_input(self, step_definition: Dict[str, Any], 
                            context: Dict[str, Any], 
