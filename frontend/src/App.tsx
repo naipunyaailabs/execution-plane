@@ -12,6 +12,8 @@ import Monitoring from "./pages/Monitoring";
 import Audit from "./pages/Audit";
 import Login from "./pages/Login";
 import NotFound from "./pages/NotFound";
+import { AgentBuilder } from "./components/AgentBuilder";
+import { NoCodeWorkflowBuilder, ProductionWorkflowBuilder } from "./components/workflow";
 
 const queryClient = new QueryClient();
 
@@ -76,6 +78,30 @@ const App = () => (
                 element={
                   <ProtectedRoute>
                     <Audit />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/playground"
+                element={
+                  <ProtectedRoute>
+                    <AgentBuilder />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/workflow-builder"
+                element={
+                  <ProtectedRoute>
+                    <NoCodeWorkflowBuilder />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/production-workflow"
+                element={
+                  <ProtectedRoute>
+                    <ProductionWorkflowBuilder />
                   </ProtectedRoute>
                 }
               />

@@ -30,11 +30,14 @@ class WorkflowService:
         """Create a new workflow"""
         workflow_id = str(uuid.uuid4())
         
+        # Convert definition to dict if it's a Pydantic model
+        definition_dict = workflow_data.definition.dict() if hasattr(workflow_data.definition, 'dict') else workflow_data.definition
+        
         db_workflow = Workflow(
             workflow_id=workflow_id,
             name=workflow_data.name,
             description=workflow_data.description,
-            definition=workflow_data.definition,
+            definition=definition_dict,
             created_by=user_id,
             version=1,  # Initial version
             tenant_id=tenant_id  # Set tenant_id for isolation
@@ -305,8 +308,8 @@ class WorkflowService:
                                     input_data: Dict[str, Any], execution_id: str) -> Dict[str, Any]:
         """Execute workflow as a graph with support for parallel execution, conditional branching, and monitoring"""
         steps = workflow_definition.get("steps", [])
-        dependencies = workflow_definition.get("dependencies", {})
-        conditions = workflow_definition.get("conditions", {})
+        dependencies = workflow_definition.get("dependencies", {}) or {}
+        conditions = workflow_definition.get("conditions", {}) or {}
         
         # Create a mapping of step IDs to step definitions
         step_map = {step["id"]: step for step in steps}
@@ -449,7 +452,7 @@ class WorkflowService:
             agent_input = self._prepare_agent_input(step_definition, context, previous_results)
             
             # Get retry policy from step definition or use default
-            retry_config = step_definition.get("retry_policy", {})
+            retry_config = step_definition.get("retry_policy") or {}
             retry_policy = RetryPolicy(
                 max_retries=retry_config.get("max_retries", DEFAULT_RETRY_POLICY.max_retries),
                 initial_delay=retry_config.get("initial_delay", DEFAULT_RETRY_POLICY.initial_delay),
@@ -540,8 +543,8 @@ class WorkflowService:
         agent_input = context.copy()
         
         # If step has specific input mapping, use that
-        if "input_mapping" in step_definition:
-            input_mapping = step_definition["input_mapping"]
+        input_mapping = step_definition.get("input_mapping")
+        if input_mapping:
             agent_input = {}
             for target_key, source_key in input_mapping.items():
                 if source_key in context:
@@ -770,6 +773,20 @@ class WorkflowService:
         except Exception as e:
             logger.warning(f"Error evaluating complex condition with operator {operator}: {str(e)}. Defaulting to True.")
             return True
+
+    async def get_workflow_executions(self, workflow_id: str, skip: int = 0, limit: int = 100) -> List[WorkflowExecution]:
+        """Get all executions for a specific workflow"""
+        executions = self.db.query(WorkflowExecution).filter(
+            WorkflowExecution.workflow_id == workflow_id
+        ).order_by(WorkflowExecution.created_at.desc()).offset(skip).limit(limit).all()
+        
+        # Load step executions for each
+        for execution in executions:
+            execution.step_executions = self.db.query(StepExecution).filter(
+                StepExecution.execution_id == execution.execution_id
+            ).all()
+        
+        return executions
 
     async def get_workflow_execution_with_steps(self, execution_id: str) -> Optional[WorkflowExecution]:
         """Retrieve a workflow execution with its step executions"""

@@ -7,6 +7,7 @@ from schemas.agent import AgentCreate, AgentInDB, AgentExecutionRequest, AgentEx
 from services.agent_service import AgentService
 from services.tools_service import ToolsService
 from core.database import get_db
+from middleware.tenant_middleware import get_current_tenant_id
 from pydantic import BaseModel
 
 # Response model that excludes sensitive information like encrypted API keys

@@ -1,7 +1,7 @@
 """
 Authentication and authorization API endpoints
 """
-from fastapi import APIRouter, Depends, HTTPException, status, Header
+from fastapi import APIRouter, Depends, HTTPException, status, Header, Body
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 from typing import Optional, List
@@ -143,14 +143,14 @@ async def register(
 
 @router.post("/login", response_model=LoginResponse)
 async def login(
-    login_data: UserLogin,
-    request: Optional[dict] = None,
+    email: EmailStr = Body(...),
+    password: str = Body(...),
     db: Session = Depends(get_db)
 ):
     """Login and get access token"""
     try:
         auth_service = AuthService(db)
-        user = await auth_service.authenticate_user(login_data.email, login_data.password)
+        user = await auth_service.authenticate_user(email, password)
         
         if not user:
             raise HTTPException(
@@ -162,17 +162,10 @@ async def login(
         access_token = auth_service.create_access_token(user)
         
         # Create session
-        # Get IP address and user agent from request if available
-        ip_address = None
-        user_agent = None
-        if request:
-            ip_address = request.get("client_host")
-            user_agent = request.get("headers", {}).get("user-agent")
-        
         session = await auth_service.create_session(
             user.user_id,
-            ip_address=ip_address,
-            user_agent=user_agent
+            ip_address=None,
+            user_agent=None
         )
         
         return LoginResponse(

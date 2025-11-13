@@ -25,8 +25,14 @@ export default function Index() {
               Monitoring
             </Link>
           </Button>
+          <Button variant="outline" asChild>
+            <Link to="/playground">
+              <Plus className="w-4 h-4 mr-2" />
+              Create Agent
+            </Link>
+          </Button>
           <Button asChild>
-            <Link to="/workflows">
+            <Link to="/production-workflow">
               <Plus className="w-4 h-4 mr-2" />
               Create Workflow
             </Link>

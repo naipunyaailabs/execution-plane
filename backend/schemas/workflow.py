@@ -106,3 +106,55 @@ class WorkflowExecutionResponse(WorkflowExecutionInDB):
 
 class WorkflowResponse(WorkflowInDB):
     pass
+
+
+# Credential schemas
+class CredentialBase(BaseModel):
+    name: str
+    type: str  # api_key, oauth2, basic_auth, database, smtp, aws
+    data: Dict[str, Any]  # Credential data (will be encrypted)
+
+
+class CredentialCreate(CredentialBase):
+    pass
+
+
+class CredentialUpdate(BaseModel):
+    name: Optional[str] = None
+    type: Optional[str] = None
+    data: Optional[Dict[str, Any]] = None
+
+
+class CredentialResponse(BaseModel):
+    id: str
+    name: str
+    type: str
+    data: Dict[str, Any]  # Sensitive fields will be masked
+    createdAt: datetime
+    updatedAt: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+# Webhook trigger schemas
+class WebhookTriggerCreate(BaseModel):
+    workflow_id: str
+    name: str
+    method: str = "POST"  # GET, POST, PUT
+    auth_type: str = "none"  # none, api_key, bearer
+    auth_config: Optional[Dict[str, Any]] = None
+
+
+class WebhookTriggerResponse(BaseModel):
+    id: str
+    workflow_id: str
+    name: str
+    webhook_url: str
+    method: str
+    auth_type: str
+    is_active: bool
+    created_at: datetime
+
+    class Config:
+        from_attributes = True

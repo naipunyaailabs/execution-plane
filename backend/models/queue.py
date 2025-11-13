@@ -1,7 +1,7 @@
 """
 Queue management models
 """
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, JSON, Text, Float, Index
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, JSON, Text, Float, Index, ForeignKey
 from sqlalchemy.sql import func
 from core.database import Base
 
@@ -41,7 +41,7 @@ class QueuedExecution(Base):
     error_message = Column(Text)
     retry_count = Column(Integer, default=0)
     max_retries = Column(Integer, default=3)
-    metadata = Column(JSON, default=dict)
+    task_metadata = Column(JSON, default=dict)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     
     # Composite index for efficient queue processing

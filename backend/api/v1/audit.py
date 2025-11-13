@@ -86,7 +86,7 @@ async def get_audit_logs(
                 success=log.success,
                 error_message=log.error_message,
                 changes=log.changes or {},
-                metadata=log.metadata or {},
+                metadata=log.audit_metadata or {},
                 created_at=log.created_at.isoformat() if log.created_at else ""
             )
             for log in logs
@@ -173,7 +173,7 @@ async def search_audit_logs(
                 success=log.success,
                 error_message=log.error_message,
                 changes=log.changes or {},
-                metadata=log.metadata or {},
+                metadata=log.audit_metadata or {},
                 created_at=log.created_at.isoformat() if log.created_at else ""
             )
             for log in logs

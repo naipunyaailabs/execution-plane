@@ -1,8 +1,9 @@
 import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { Trash2, Bot, RefreshCw } from "lucide-react";
+import { Trash2, Bot, RefreshCw, MessageSquare, Plus } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
+import { useNavigate } from "react-router-dom";
 
 interface Agent {
   agent_id: string;
@@ -30,6 +31,7 @@ export function AgentList({ onAgentDeleted }: AgentListProps) {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const navigate = useNavigate();
 
   useEffect(() => {
     fetchAgents();
@@ -122,16 +124,26 @@ export function AgentList({ onAgentDeleted }: AgentListProps) {
             {agents.length} {agents.length === 1 ? 'agent' : 'agents'} configured
           </p>
         </div>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={handleRefresh}
-          disabled={refreshing}
-          className="gap-2"
-        >
-          <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
-          <span className="hidden sm:inline">Refresh</span>
-        </Button>
+        <div className="flex gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleRefresh}
+            disabled={refreshing}
+            className="gap-2"
+          >
+            <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
+            <span className="hidden sm:inline">Refresh</span>
+          </Button>
+          <Button
+            size="sm"
+            onClick={() => navigate('/playground')}
+            className="gap-2"
+          >
+            <Plus className="w-4 h-4" />
+            Create Agent
+          </Button>
+        </div>
       </div>
       {agents.length === 0 ? (
         <Card className="border-dashed">
@@ -150,7 +162,7 @@ export function AgentList({ onAgentDeleted }: AgentListProps) {
               className="group hover:shadow-lg transition-all duration-200 hover:border-primary/50 overflow-hidden h-full"
             >
               <div className="p-6">
-                <div className="flex items-center justify-between">
+                <div className="flex items-center justify-between mb-4">
                   <div className="flex items-center gap-4 min-w-0 flex-1">
                     <div className="w-12 h-12 rounded-lg bg-gradient-to-br from-primary to-primary/70 flex items-center justify-center flex-shrink-0 shadow-sm">
                       <Bot className="w-6 h-6 text-primary-foreground" />
@@ -167,10 +179,24 @@ export function AgentList({ onAgentDeleted }: AgentListProps) {
                   <Button
                     variant="ghost"
                     size="icon"
-                    onClick={() => handleDeleteAgent(agent.agent_id, agent.name)}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleDeleteAgent(agent.agent_id, agent.name);
+                    }}
                     className="text-muted-foreground hover:text-destructive hover:bg-destructive/10 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0 ml-2"
                   >
                     <Trash2 className="w-5 h-5" />
+                  </Button>
+                </div>
+                <div className="flex gap-2 pt-3 border-t">
+                  <Button
+                    variant="default"
+                    size="sm"
+                    className="flex-1 gap-2"
+                    onClick={() => navigate('/chat')}
+                  >
+                    <MessageSquare className="w-4 h-4" />
+                    Chat
                   </Button>
                 </div>
               </div>

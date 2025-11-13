@@ -109,7 +109,7 @@ class QueueService:
             input_data=input_data or {},
             scheduled_at=scheduled_at,
             max_retries=max_retries,
-            metadata=metadata or {}
+            task_metadata=metadata or {}
         )
         
         self.db.add(queued_execution)

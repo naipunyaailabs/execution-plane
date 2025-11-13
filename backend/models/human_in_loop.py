@@ -51,7 +51,7 @@ class HumanTask(Base):
     assigned_at = Column(DateTime(timezone=True))
     completed_at = Column(DateTime(timezone=True))
     expires_at = Column(DateTime(timezone=True))
-    metadata = Column(JSON, default=dict)
+    task_metadata = Column(JSON, default=dict)
     
     # Relationship
     approval_gate = relationship("ApprovalGate", back_populates="tasks")

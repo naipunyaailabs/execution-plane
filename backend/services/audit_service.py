@@ -57,7 +57,7 @@ class AuditService:
             success=1 if success else 0,
             error_message=error_message,
             changes=changes or {},
-            metadata=metadata or {}
+            audit_metadata=metadata or {}
         )
         
         self.db.add(audit_log)

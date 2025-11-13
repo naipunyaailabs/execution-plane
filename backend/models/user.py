@@ -22,7 +22,7 @@ class User(Base):
     tenant_id = Column(String, index=True)  # For multi-tenancy support
     roles = Column(JSON, default=list)  # List of role names
     permissions = Column(JSON, default=list)  # List of permission strings
-    metadata = Column(JSON, default=dict)  # Additional user metadata
+    user_metadata = Column(JSON, default=dict)  # Additional user metadata
     last_login = Column(DateTime(timezone=True))
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())

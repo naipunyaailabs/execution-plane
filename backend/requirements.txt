@@ -1,5 +1,5 @@
-fastapi==0.104.1
-uvicorn[standard]==0.24.0
+fastapi==0.115.0
+uvicorn[standard]==0.32.0
 python-dotenv==1.0.0
 sqlalchemy==2.0.31
 pydantic==2.10.6
@@ -46,6 +46,7 @@ psutil==6.1.0
 
 # Authentication dependencies
 passlib[bcrypt]==1.7.4
+argon2-cffi==25.1.0
 PyJWT==2.8.0
 python-jose[cryptography]==3.3.0
 

@@ -1,7 +1,7 @@
 """
 Cost tracking models for API usage and cost analytics
 """
-from sqlalchemy import Column, Integer, String, Float, DateTime, JSON, ForeignKey
+from sqlalchemy import Column, Integer, String, Float, DateTime, JSON, ForeignKey, Text, Boolean
 from sqlalchemy.sql import func
 from core.database import Base
 
@@ -22,7 +22,7 @@ class APICall(Base):
     output_tokens = Column(Integer, default=0)
     total_tokens = Column(Integer, default=0)
     cost = Column(Float, default=0.0)  # Calculated cost in USD
-    metadata = Column(JSON)  # Additional call metadata
+    call_metadata = Column(JSON)  # Additional call metadata
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 

@@ -26,7 +26,7 @@ class AuditLog(Base):
     success = Column(Integer, default=1)  # 1 for success, 0 for failure
     error_message = Column(Text)  # Error message if action failed
     changes = Column(JSON)  # Before/after changes for updates
-    metadata = Column(JSON)  # Additional metadata
+    audit_metadata = Column(JSON)  # Additional metadata
     created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
     
     # Composite indexes for common queries

@@ -97,3 +97,17 @@ class ExecutionLog(Base):
 
 # Add relationship to ExecutionLog in WorkflowExecution
 WorkflowExecution.logs = relationship("ExecutionLog", back_populates="workflow_execution")
+
+
+class Credential(Base):
+    __tablename__ = "credentials"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    credential_id = Column(String, unique=True, index=True)
+    name = Column(String, index=True)
+    type = Column(String)  # api_key, oauth2, basic_auth, database, smtp, aws
+    data = Column(JSON)  # Encrypted credential data
+    tenant_id = Column(String, index=True)  # For multi-tenancy isolation
+    created_by = Column(String)  # User ID who created the credential
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())

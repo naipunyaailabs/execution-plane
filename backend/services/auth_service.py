@@ -17,8 +17,8 @@ from core.config import settings
 
 logger = logging.getLogger(__name__)
 
-# Password hashing context
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+# Password hashing context - support both argon2 and bcrypt
+pwd_context = CryptContext(schemes=["argon2", "bcrypt"], deprecated="auto")
 
 # JWT settings
 JWT_SECRET_KEY = settings.SECRET_KEY

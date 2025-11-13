@@ -46,7 +46,7 @@ class TemplateService:
             workflow_definition=workflow_definition,
             is_public=is_public,
             created_by=created_by,
-            metadata=metadata or {}
+            template_metadata=metadata or {}
         )
         
         self.db.add(template)

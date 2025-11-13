@@ -24,7 +24,7 @@ class WorkflowTemplate(Base):
     usage_count = Column(Integer, default=0)  # Number of times template was used
     rating = Column(Integer)  # Average rating (1-5)
     rating_count = Column(Integer, default=0)  # Number of ratings
-    metadata = Column(JSON, default=dict)  # Additional metadata
+    template_metadata = Column(JSON, default=dict)  # Additional metadata
     created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 

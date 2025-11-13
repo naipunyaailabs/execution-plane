@@ -118,7 +118,7 @@ class CostTrackingService:
             output_tokens=output_tokens,
             total_tokens=total_tokens,
             cost=cost,
-            metadata=metadata or {}
+            call_metadata=metadata or {}
         )
         
         self.db.add(api_call)

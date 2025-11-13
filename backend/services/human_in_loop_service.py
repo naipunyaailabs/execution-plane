@@ -122,7 +122,7 @@ class HumanInLoopService:
             assigned_to=assigned_to,
             input_data=input_data or {},
             expires_at=expires_at,
-            metadata=metadata or {}
+            task_metadata=metadata or {}
         )
         
         self.db.add(task)
