@@ -3,6 +3,7 @@
  * Provides utilities for communicating with agents using AG-UI Protocol
  */
 import { useState, useCallback, useRef, useEffect } from 'react';
+import { API_ENDPOINTS } from "@/lib/api-config";
 
 export enum AGUIEventType {
   RUN_STARTED = 'run_started',
@@ -56,7 +57,8 @@ export function useAGUI(options: UseAGUIOptions) {
       return;
     }
 
-    const wsUrl = `ws://localhost:8000/api/v1/agents/${agentId}/stream`;
+    // Use API config for WebSocket URL
+    const wsUrl = API_ENDPOINTS.AGENTS.STREAM(agentId);
     const ws = new WebSocket(wsUrl);
 
     ws.onopen = () => {

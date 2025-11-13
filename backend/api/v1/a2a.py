@@ -60,22 +60,13 @@ async def handle_a2a_request(
             # Create protocol instance
             protocol = A2AProtocol(agent_id, agent_card)
             
-            # Register handler for task execution
-            def handle_execute_task(params: Dict[str, Any]) -> Dict[str, Any]:
+            # Register async handler for task execution
+            async def handle_execute_task(params: Dict[str, Any]) -> Dict[str, Any]:
                 task = params.get("task", {})
                 input_text = task.get("input", "")
                 
-                # Execute agent (synchronous wrapper)
-                import asyncio
-                try:
-                    loop = asyncio.get_event_loop()
-                except RuntimeError:
-                    loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
-                
-                response = loop.run_until_complete(
-                    agent_service.execute_agent(agent_id, input_text)
-                )
+                # Execute agent (properly async)
+                response = await agent_service.execute_agent(agent_id, input_text)
                 
                 return {
                     "task_id": task.get("task_id", ""),
@@ -88,8 +79,8 @@ async def handle_a2a_request(
             # Register in registry
             a2a_registry.register_agent(agent_card, protocol)
         
-        # Handle request
-        response = protocol.handle_request(request)
+        # Handle request (now async)
+        response = await protocol.handle_request(request)
         return response.to_dict()
     
     except Exception as e:

@@ -198,10 +198,10 @@ class WorkflowService:
         
         return db_step
 
-    async def execute_workflow(self, workflow_id: str, input_data: Dict[str, Any]) -> WorkflowExecution:
+    async def execute_workflow(self, workflow_id: str, input_data: Dict[str, Any], tenant_id: Optional[str] = None) -> WorkflowExecution:
         """Execute a workflow with the given input and Langfuse tracing"""
-        # Get the workflow
-        workflow = await self.get_workflow(workflow_id)
+        # Get the workflow (with tenant filtering)
+        workflow = await self.get_workflow(workflow_id, tenant_id=tenant_id)
         if not workflow:
             raise ValueError("Workflow not found")
         
@@ -210,7 +210,7 @@ class WorkflowService:
             workflow_id=workflow_id,
             input_data=input_data
         )
-        execution = await self.create_workflow_execution(execution_data)
+        execution = await self.create_workflow_execution(execution_data, tenant_id=tenant_id)
         
         # Get the execution ID as a string
         execution_id = str(getattr(execution, 'execution_id'))

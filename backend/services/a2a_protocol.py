@@ -165,11 +165,11 @@ class A2AProtocol:
         self.method_handlers[A2AMethod.GET_CAPABILITIES] = self._handle_get_capabilities
     
     def register_handler(self, method: str, handler: Callable):
-        """Register a custom method handler"""
+        """Register a custom method handler (can be sync or async)"""
         self.method_handlers[method] = handler
     
-    def handle_request(self, request_data: Dict[str, Any]) -> A2AResponse:
-        """Handle an incoming A2A request"""
+    async def handle_request(self, request_data: Dict[str, Any]) -> A2AResponse:
+        """Handle an incoming A2A request (supports both sync and async handlers)"""
         try:
             request = A2ARequest(
                 method=request_data.get("method", ""),
@@ -195,16 +195,25 @@ class A2AProtocol:
                     f"Method '{request.method}' is not supported"
                 )
             
-            # Execute handler
+            # Execute handler (support both sync and async)
             try:
-                result = handler(request.params or {})
+                import asyncio
+                import inspect
+                
+                # Check if handler is async
+                if inspect.iscoroutinefunction(handler):
+                    result = await handler(request.params or {})
+                else:
+                    # Sync handler - run in thread pool to avoid blocking
+                    result = await asyncio.to_thread(handler, request.params or {})
+                
                 return A2AResponse(
                     jsonrpc="2.0",
                     result=result,
                     id=request.id
                 )
             except Exception as e:
-                logger.error(f"Error executing handler for {request.method}: {e}")
+                logger.error(f"Error executing handler for {request.method}: {e}", exc_info=True)
                 return A2AResponse.error_response(
                     request.id or "",
                     -32603,
@@ -213,7 +222,7 @@ class A2AProtocol:
                 )
         
         except Exception as e:
-            logger.error(f"Error handling A2A request: {e}")
+            logger.error(f"Error handling A2A request: {e}", exc_info=True)
             return A2AResponse.error_response(
                 request_data.get("id", ""),
                 -32700,

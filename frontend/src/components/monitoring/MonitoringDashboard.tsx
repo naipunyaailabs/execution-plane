@@ -2,9 +2,11 @@ import { useState, useEffect } from "react";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { RefreshCw, Activity, CheckCircle, XCircle, Clock, TrendingUp } from "lucide-react";
+import { RefreshCw, Activity, CheckCircle, XCircle, Clock, TrendingUp, Wifi, WifiOff } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, BarChart, Bar } from "recharts";
+import { useObservabilityMetrics } from "@/hooks/use-observability";
+import { API_ENDPOINTS } from "@/lib/api-config";
 
 interface DashboardStats {
   total_executions: number;
@@ -31,23 +33,31 @@ interface ExecutionStatus {
 export function MonitoringDashboard() {
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [refreshInterval, setRefreshInterval] = useState(5000); // 5 seconds
+  
+  // Real-time observability metrics via WebSocket
+  const { metrics: realTimeMetrics, isConnected: wsConnected } = useObservabilityMetrics();
 
-  // Fetch dashboard stats
+  // Fetch dashboard stats (fallback to REST if WebSocket not available)
   const { data: stats, refetch: refetchStats } = useQuery<DashboardStats>({
     queryKey: ["dashboard-stats"],
     queryFn: async () => {
-      const response = await fetch("http://localhost:8000/api/v1/monitoring/health");
+      const response = await fetch(API_ENDPOINTS.MONITORING.HEALTH);
       if (!response.ok) throw new Error("Failed to fetch stats");
       return response.json();
     },
-    refetchInterval: autoRefresh ? refreshInterval : false,
+    refetchInterval: autoRefresh && !wsConnected ? refreshInterval : false,
   });
+  
+  // Use real-time metrics if available, otherwise fallback to REST
+  const displayStats = wsConnected && realTimeMetrics?.health 
+    ? { ...stats, ...realTimeMetrics.health, ...realTimeMetrics.real_time }
+    : stats;
 
   // Fetch recent executions
   const { data: executions, refetch: refetchExecutions } = useQuery<ExecutionStatus[]>({
     queryKey: ["recent-executions"],
     queryFn: async () => {
-      const response = await fetch("http://localhost:8000/api/v1/monitoring/recent-executions?limit=10");
+      const response = await fetch(`${API_ENDPOINTS.MONITORING.RECENT_EXECUTIONS}?limit=10`);
       if (!response.ok) throw new Error("Failed to fetch executions");
       return response.json();
     },
@@ -58,7 +68,7 @@ export function MonitoringDashboard() {
   const { data: metricsData } = useQuery({
     queryKey: ["workflow-metrics"],
     queryFn: async () => {
-      const response = await fetch("http://localhost:8000/api/v1/monitoring/metrics/workflow-executions");
+      const response = await fetch(API_ENDPOINTS.MONITORING.METRICS.WORKFLOW_EXECUTIONS);
       if (!response.ok) throw new Error("Failed to fetch metrics");
       const data = await response.json();
       
@@ -82,13 +92,30 @@ export function MonitoringDashboard() {
 
   return (
     <div className="space-y-6">
+      {/* Connection Status */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          {wsConnected ? (
+            <>
+              <Wifi className="h-4 w-4 text-green-500" />
+              <span className="text-sm text-green-500">Real-time updates active</span>
+            </>
+          ) : (
+            <>
+              <WifiOff className="h-4 w-4 text-gray-400" />
+              <span className="text-sm text-gray-400">Using polling (WebSocket unavailable)</span>
+            </>
+          )}
+        </div>
+      </div>
+      
       {/* Stats Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         <Card className="p-6">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm font-medium text-muted-foreground">Total Executions</p>
-              <p className="text-2xl font-bold mt-2">{stats?.total_executions || 0}</p>
+              <p className="text-2xl font-bold mt-2">{displayStats?.total_executions || 0}</p>
             </div>
             <Activity className="h-8 w-8 text-blue-500" />
           </div>
@@ -98,7 +125,7 @@ export function MonitoringDashboard() {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm font-medium text-muted-foreground">Running</p>
-              <p className="text-2xl font-bold mt-2">{stats?.running_executions || 0}</p>
+              <p className="text-2xl font-bold mt-2">{displayStats?.running_executions || 0}</p>
             </div>
             <Clock className="h-8 w-8 text-yellow-500" />
           </div>
@@ -108,7 +135,7 @@ export function MonitoringDashboard() {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm font-medium text-muted-foreground">Success Rate</p>
-              <p className="text-2xl font-bold mt-2">{stats?.success_rate?.toFixed(1) || 0}%</p>
+              <p className="text-2xl font-bold mt-2">{displayStats?.success_rate?.toFixed(1) || 0}%</p>
             </div>
             <CheckCircle className="h-8 w-8 text-green-500" />
           </div>
@@ -119,7 +146,7 @@ export function MonitoringDashboard() {
             <div>
               <p className="text-sm font-medium text-muted-foreground">Avg Execution Time</p>
               <p className="text-2xl font-bold mt-2">
-                {stats?.avg_execution_time ? `${stats.avg_execution_time.toFixed(1)}s` : "0s"}
+                {displayStats?.avg_execution_time ? `${displayStats.avg_execution_time.toFixed(1)}s` : "0s"}
               </p>
             </div>
             <TrendingUp className="h-8 w-8 text-purple-500" />
