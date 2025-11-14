@@ -62,6 +62,8 @@ import { CredentialsManager } from "./CredentialsManager";
 import { ExecutionHistory } from "./ExecutionHistory";
 import { WorkflowTriggers, WorkflowTrigger } from "./WorkflowTriggers";
 import { ExpressionEditor, ParameterMapper } from "./ExpressionEditor";
+import { ActionNodeConfig } from "./ActionNodeConfig";
+import { transformWorkflowForBackend, validateWorkflow as validateWorkflowStructure } from "./workflowTransformers";
 
 export function ProductionWorkflowBuilder() {
   const navigate = useNavigate();
@@ -75,6 +77,7 @@ export function ProductionWorkflowBuilder() {
   const [isNodeDialogOpen, setIsNodeDialogOpen] = useState(false);
   const [agents, setAgents] = useState<Array<{ agent_id: string; name: string }>>([]);
   const [triggers, setTriggers] = useState<WorkflowTrigger[]>([]);
+  const [credentials, setCredentials] = useState<Array<{ id: string; name: string; type: string }>>([]);
 
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
@@ -86,15 +89,29 @@ export function ProductionWorkflowBuilder() {
   const [currentExecution, setCurrentExecution] = useState<WorkflowExecutionResult | null>(null);
   const [testMode, setTestMode] = useState(false);
   const [testData, setTestData] = useState("{}");
+  const [showExecuteDialog, setShowExecuteDialog] = useState(false);
+  const [executionInput, setExecutionInput] = useState("{\n  \"query\": \"Hello, how can you help me?\"\n}");
 
   // Settings
   const [activeTab, setActiveTab] = useState("canvas");
   const [showMinimap, setShowMinimap] = useState(true);
   const [autoSave, setAutoSave] = useState(false);
 
-  // Load agents
+  // Load agents, credentials, and workflow
   useEffect(() => {
-    loadAgents();
+    const initializeBuilder = async () => {
+      await loadAgents();
+      await loadCredentials();
+      
+      // Load workflow from URL params if present
+      const params = new URLSearchParams(window.location.search);
+      const workflowIdParam = params.get('id');
+      if (workflowIdParam) {
+        await loadWorkflow(workflowIdParam);
+      }
+    };
+    
+    initializeBuilder();
   }, []);
 
   const loadAgents = async () => {
@@ -106,6 +123,60 @@ export function ProductionWorkflowBuilder() {
       }
     } catch (error) {
       console.error("Error loading agents:", error);
+    }
+  };
+
+  const loadCredentials = async () => {
+    try {
+      const response = await fetch("http://localhost:8000/api/v1/credentials");
+      if (response.ok) {
+        const data = await response.json();
+        setCredentials(data || []);
+      }
+    } catch (error) {
+      console.error("Error loading credentials:", error);
+    }
+  };
+
+  const loadWorkflow = async (id: string) => {
+    try {
+      const response = await fetch(`http://localhost:8000/api/v1/workflows/${id}`);
+      if (response.ok) {
+        const workflow = await response.json();
+        
+        // Set basic workflow info
+        setWorkflowId(workflow.workflow_id || id);
+        setWorkflowName(workflow.name || "");
+        setWorkflowDescription(workflow.description || "");
+        
+        // Load visualization data if available (React Flow format)
+        if (workflow.definition?.visualization) {
+          const viz = workflow.definition.visualization;
+          setNodes(viz.nodes || []);
+          setEdges(viz.edges || []);
+          
+          toast({
+            title: "Workflow Loaded",
+            description: `Successfully loaded "${workflow.name}"`,
+          });
+        } else {
+          // Fallback: Try to reconstruct from steps (legacy format)
+          toast({
+            title: "Legacy Format",
+            description: "Workflow uses old format. Please re-save to update.",
+            variant: "destructive",
+          });
+        }
+      } else {
+        throw new Error("Failed to load workflow");
+      }
+    } catch (error: any) {
+      console.error("Error loading workflow:", error);
+      toast({
+        title: "Error Loading Workflow",
+        description: error.message || "Failed to load workflow",
+        variant: "destructive",
+      });
     }
   };
 
@@ -164,17 +235,29 @@ export function ProductionWorkflowBuilder() {
         return { label: "Custom Action", action_type: "", description: "", config: {} };
       case "errorHandlerNode":
         return { label: "Error Handler", error_type: "all", description: "" };
+      case "chatNode":
+        return { label: "Chat / Manual", description: "Interactive manual trigger", welcomeMessage: "Hello! How can I help you?" };
+      case "displayNode":
+        return { label: "Display Output", description: "Shows execution results", previewData: {} };
       default:
         return { label: "Node" };
     }
   };
 
   const updateNode = (nodeId: string, updates: Partial<Node["data"]>) => {
-    setNodes((nds) =>
-      nds.map((node) =>
+    setNodes((nds) => {
+      const updatedNodes = nds.map((node) =>
         node.id === nodeId ? { ...node, data: { ...node.data, ...updates } } : node
-      )
-    );
+      );
+      // Update selectedNode to keep dialog in sync
+      if (selectedNode && selectedNode.id === nodeId) {
+        const updatedNode = updatedNodes.find(n => n.id === nodeId);
+        if (updatedNode) {
+          setSelectedNode(updatedNode);
+        }
+      }
+      return updatedNodes;
+    });
   };
 
   const handleNodeClick = (event: React.MouseEvent, node: Node) => {
@@ -197,44 +280,66 @@ export function ProductionWorkflowBuilder() {
       return;
     }
 
-    const steps = nodes.map((node) => ({
-      id: node.id,
-      type: node.type || "agentNode",
-      name: node.data.label || "Unnamed Step",
-      agent_id: node.data.agent_id || "",
-      description: node.data.description || "",
-      position: node.position,
-      data: node.data,
-    }));
+    // Validate workflow structure
+    const validation = validateWorkflowStructure(nodes, edges);
+    if (!validation.valid) {
+      toast({
+        title: "Validation Error",
+        description: validation.error,
+        variant: "destructive",
+      });
+      return;
+    }
 
-    const dependencies: Record<string, string[]> = {};
-    edges.forEach((edge) => {
-      if (!dependencies[edge.target]) {
-        dependencies[edge.target] = [];
-      }
-      dependencies[edge.target].push(edge.source);
-    });
+    // Transform workflow using proper transformation logic
+    const workflowData = transformWorkflowForBackend(
+      nodes,
+      edges,
+      workflowName,
+      workflowDescription,
+      triggers
+    );
 
-    const workflowData = {
-      name: workflowName,
-      description: workflowDescription,
-      definition: { steps, dependencies, conditions: {} },
-      triggers,
+    // Add visualization data to preserve React Flow format
+    workflowData.definition.visualization = {
+      nodes: nodes.map(node => ({
+        id: node.id,
+        type: node.type,
+        position: node.position,
+        data: node.data
+      })),
+      edges: edges.map(edge => ({
+        id: edge.id,
+        source: edge.source,
+        target: edge.target,
+        sourceHandle: edge.sourceHandle,
+        targetHandle: edge.targetHandle,
+        type: edge.type
+      }))
     };
 
     try {
-      const response = await fetch("http://localhost:8000/api/v1/workflows", {
-        method: "POST",
+      // Determine if this is a create or update operation
+      const isUpdate = workflowId && !workflowId.startsWith('workflow-');
+      const url = isUpdate 
+        ? `http://localhost:8000/api/v1/workflows/${workflowId}`
+        : "http://localhost:8000/api/v1/workflows";
+      const method = isUpdate ? "PUT" : "POST";
+
+      const response = await fetch(url, {
+        method: method,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(workflowData),
       });
 
       if (response.ok) {
         const savedWorkflow = await response.json();
-        setWorkflowId(savedWorkflow.id || workflowId);
+        setWorkflowId(savedWorkflow.workflow_id || savedWorkflow.id || workflowId);
         toast({
-          title: "Workflow Saved",
-          description: "Your workflow has been saved successfully.",
+          title: isUpdate ? "Workflow Updated" : "Workflow Saved",
+          description: isUpdate 
+            ? "Your workflow has been updated successfully."
+            : "Your workflow has been saved successfully.",
         });
       } else {
         const error = await response.json();
@@ -250,8 +355,13 @@ export function ProductionWorkflowBuilder() {
   };
 
   const handleExecuteWorkflow = async () => {
+    // Show input dialog first
+    setShowExecuteDialog(true);
+  };
+
+  const executeWorkflowWithInput = async () => {
     // Validate workflow structure
-    const validation = validateWorkflow();
+    const validation = validateWorkflowStructure(nodes, edges);
     if (!validation.valid) {
       toast({
         title: "Validation Error",
@@ -261,18 +371,23 @@ export function ProductionWorkflowBuilder() {
       return;
     }
 
+    setShowExecuteDialog(false);
     setIsExecuting(true);
     setIsPaused(false);
 
     try {
-      // Parse test data safely
+      // Parse execution input
       let variables = {};
-      if (testMode) {
-        try {
-          variables = JSON.parse(testData);
-        } catch (error) {
-          throw new Error("Invalid JSON in test data");
-        }
+      try {
+        variables = JSON.parse(executionInput);
+      } catch (error) {
+        toast({
+          title: "Invalid Input",
+          description: "Please provide valid JSON input",
+          variant: "destructive",
+        });
+        setIsExecuting(false);
+        return;
       }
 
       const engine = new WorkflowExecutionEngine(
@@ -345,36 +460,6 @@ export function ProductionWorkflowBuilder() {
     setCurrentExecution(result);
   };
 
-  const validateWorkflow = (): { valid: boolean; error?: string } => {
-    if (nodes.length === 0) {
-      return { valid: false, error: "Add nodes to the workflow before executing" };
-    }
-
-    const hasStart = nodes.some((n) => n.type === "startNode");
-    if (!hasStart) {
-      return { valid: false, error: "Workflow must have a Start node" };
-    }
-
-    // Check for disconnected nodes
-    const connectedNodeIds = new Set<string>();
-    edges.forEach((e) => {
-      connectedNodeIds.add(e.source);
-      connectedNodeIds.add(e.target);
-    });
-
-    const disconnectedNodes = nodes.filter(
-      (n) => !connectedNodeIds.has(n.id) && n.type !== "startNode"
-    );
-
-    if (disconnectedNodes.length > 0) {
-      return {
-        valid: false,
-        error: `${disconnectedNodes.length} node(s) are not connected`,
-      };
-    }
-
-    return { valid: true };
-  };
 
   const exportWorkflow = () => {
     const fileName = workflowName
@@ -426,18 +511,6 @@ export function ProductionWorkflowBuilder() {
     input.click();
   };
 
-  const handleDeleteNode = () => {
-    if (selectedNode) {
-      setNodes((nds) => nds.filter((n) => n.id !== selectedNode.id));
-      setEdges((eds) =>
-        eds.filter((e) => e.source !== selectedNode.id && e.target !== selectedNode.id)
-      );
-      setIsNodeDialogOpen(false);
-      setSelectedNode(null);
-      toast({ title: "Deleted", description: "Node deleted successfully" });
-    }
-  };
-
   const clearWorkflow = () => {
     if (confirm("Are you sure you want to clear the entire workflow?")) {
       setNodes([]);
@@ -446,6 +519,17 @@ export function ProductionWorkflowBuilder() {
       setWorkflowDescription("");
       setTriggers([]);
       toast({ title: "Cleared", description: "Workflow cleared" });
+    }
+  };
+
+  const handleDeleteNode = () => {
+    if (selectedNode) {
+      setNodes((nds) => nds.filter((node) => node.id !== selectedNode.id));
+      setEdges((eds) =>
+        eds.filter((edge) => edge.source !== selectedNode.id && edge.target !== selectedNode.id)
+      );
+      setIsNodeDialogOpen(false);
+      setSelectedNode(null);
     }
   };
 
@@ -625,15 +709,52 @@ export function ProductionWorkflowBuilder() {
         </div>
       </div>
 
-      {/* Enhanced Node Configuration Dialog - continued in next message due to length */}
-      {renderNodeConfigDialog()}
-    </div>
-  );
+      {/* Workflow Execution Input Dialog */}
+      <Dialog open={showExecuteDialog} onOpenChange={setShowExecuteDialog}>
+        <DialogContent className="sm:max-w-[600px]">
+          <DialogHeader>
+            <DialogTitle>Workflow Execution Input</DialogTitle>
+            <DialogDescription>
+              Provide input data for your workflow. This will be available as input_data in your nodes.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <Label>Input Data (JSON)</Label>
+              <Textarea
+                value={executionInput}
+                onChange={(e) => setExecutionInput(e.target.value)}
+                placeholder={'{\n  "query": "Your input here",\n  "user_id": "123"\n}'}
+                className="mt-2 font-mono text-sm"
+                rows={12}
+              />
+              <p className="text-xs text-muted-foreground mt-2">
+                💡 This data will be accessible in agent nodes through parameters like <code className="bg-muted px-1 py-0.5 rounded">{"{{ $json.query }}"}</code>
+              </p>
+            </div>
+            
+            <div className="bg-blue-50 dark:bg-blue-950 p-3 rounded-lg text-sm">
+              <p className="font-semibold text-blue-900 dark:text-blue-100 mb-1">Example usage:</p>
+              <ul className="text-blue-800 dark:text-blue-200 space-y-1 list-disc list-inside">
+                <li>Agent parameters: <code className="bg-blue-100 dark:bg-blue-900 px-1 py-0.5 rounded text-xs">query → {"{{ $json.query }}"}</code></li>
+                <li>Condition: <code className="bg-blue-100 dark:bg-blue-900 px-1 py-0.5 rounded text-xs">{"{{ $json.user_id === '123' }}"}</code></li>
+              </ul>
+            </div>
+          </div>
+          <div className="flex justify-end gap-2 mt-4">
+            <Button variant="outline" onClick={() => setShowExecuteDialog(false)}>
+              Cancel
+            </Button>
+            <Button onClick={executeWorkflowWithInput} className="gap-2">
+              <Play className="w-4 h-4" />
+              Execute Workflow
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
-  function renderNodeConfigDialog() {
-    if (!selectedNode) return null;
-
-    return (
+      {/* Enhanced Node Configuration Dialog */}
+      {selectedNode && (
       <Dialog open={isNodeDialogOpen} onOpenChange={setIsNodeDialogOpen}>
         <DialogContent className="sm:max-w-[700px] max-h-[85vh] overflow-y-auto">
           <DialogHeader>
@@ -644,9 +765,12 @@ export function ProductionWorkflowBuilder() {
           </DialogHeader>
 
           <Tabs defaultValue="general" className="mt-4">
-            <TabsList className="grid w-full grid-cols-3">
+            <TabsList className={`grid w-full ${selectedNode.type === "agentNode" ? "grid-cols-3" : "grid-cols-4"}`}>
               <TabsTrigger value="general">General</TabsTrigger>
               <TabsTrigger value="parameters">Parameters</TabsTrigger>
+              {selectedNode.type !== "agentNode" && (
+                <TabsTrigger value="advanced">Advanced</TabsTrigger>
+              )}
               <TabsTrigger value="output">Output</TabsTrigger>
             </TabsList>
 
@@ -698,60 +822,119 @@ export function ProductionWorkflowBuilder() {
               )}
 
               {selectedNode.type === "loopNode" && (
-                <div>
-                  <Label>Iterations</Label>
-                  <Input
-                    type="number"
-                    value={selectedNode.data.iterations || 10}
-                    onChange={(e) => updateNode(selectedNode.id, { iterations: parseInt(e.target.value) || 10 })}
-                    className="mt-1"
-                    min="1"
-                    max="1000"
-                  />
-                  <p className="text-xs text-muted-foreground mt-1">
-                    Maximum number of loop iterations
-                  </p>
-                </div>
+                <>
+                  <div>
+                    <Label>Collection Path</Label>
+                    <Input
+                      placeholder="{{ $json.items }}" 
+                      value={selectedNode.data.collection_path || ""}
+                      onChange={(e) => updateNode(selectedNode.id, { collection_path: e.target.value })}
+                      className="mt-1 font-mono text-sm"
+                    />
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Path to array (e.g., {`{{ $node.previousStep.json.items }}`})
+                    </p>
+                  </div>
+                  
+                  <div>
+                    <Label>Max Iterations</Label>
+                    <Input
+                      type="number"
+                      value={selectedNode.data.iterations || 10}
+                      onChange={(e) => updateNode(selectedNode.id, { iterations: parseInt(e.target.value) || 10 })}
+                      className="mt-1"
+                      min="1"
+                      max="1000"
+                    />
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Maximum number of loop iterations
+                    </p>
+                  </div>
+                </>
               )}
 
               {selectedNode.type === "actionNode" && (
-                <div>
-                  <Label>Action Type</Label>
-                  <Select
-                    value={selectedNode.data.action_type || ""}
-                    onValueChange={(value) => updateNode(selectedNode.id, { action_type: value })}
-                  >
-                    <SelectTrigger className="mt-1">
-                      <SelectValue placeholder="Select action type" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="api_call">API Call</SelectItem>
-                      <SelectItem value="data_transform">Data Transform</SelectItem>
-                      <SelectItem value="webhook">Webhook</SelectItem>
-                      <SelectItem value="custom">Custom Script</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
+                <>
+                  <div>
+                    <Label>Action Type</Label>
+                    <Select
+                      value={selectedNode.data.action_type || ""}
+                      onValueChange={(value) => updateNode(selectedNode.id, { action_type: value })}
+                    >
+                      <SelectTrigger className="mt-1">
+                        <SelectValue placeholder="Select action type" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="api_call">API Call</SelectItem>
+                        <SelectItem value="http_request">HTTP Request</SelectItem>
+                        <SelectItem value="data_transform">Data Transform</SelectItem>
+                        <SelectItem value="webhook">Webhook</SelectItem>
+                        <SelectItem value="wait">Wait/Delay</SelectItem>
+                        <SelectItem value="custom">Custom Script</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  
+                  {selectedNode.data.action_type && (
+                    <ActionNodeConfig
+                      actionType={selectedNode.data.action_type}
+                      config={selectedNode.data.action_config || {}}
+                      onChange={(config) => updateNode(selectedNode.id, { action_config: config })}
+                    />
+                  )}
+                </>
               )}
 
               {selectedNode.type === "errorHandlerNode" && (
-                <div>
-                  <Label>Error Type</Label>
-                  <Select
-                    value={selectedNode.data.error_type || "all"}
-                    onValueChange={(value) => updateNode(selectedNode.id, { error_type: value })}
-                  >
-                    <SelectTrigger className="mt-1">
-                      <SelectValue placeholder="Select error type" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Errors</SelectItem>
-                      <SelectItem value="timeout">Timeout</SelectItem>
-                      <SelectItem value="validation">Validation</SelectItem>
-                      <SelectItem value="network">Network</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
+                <>
+                  <div>
+                    <Label>Error Type</Label>
+                    <Select
+                      value={selectedNode.data.error_type || "all"}
+                      onValueChange={(value) => updateNode(selectedNode.id, { error_type: value })}
+                    >
+                      <SelectTrigger className="mt-1">
+                        <SelectValue placeholder="Select error type" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All Errors</SelectItem>
+                        <SelectItem value="timeout">Timeout</SelectItem>
+                        <SelectItem value="validation">Validation</SelectItem>
+                        <SelectItem value="network">Network</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  
+                  <div>
+                    <Label>Recovery Action</Label>
+                    <Select
+                      value={selectedNode.data.recovery_action || "continue"}
+                      onValueChange={(value) => updateNode(selectedNode.id, { recovery_action: value })}
+                    >
+                      <SelectTrigger className="mt-1">
+                        <SelectValue placeholder="Select recovery action" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="continue">Continue Workflow</SelectItem>
+                        <SelectItem value="retry">Retry Step</SelectItem>
+                        <SelectItem value="fallback">Use Fallback Value</SelectItem>
+                        <SelectItem value="stop">Stop Workflow</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  
+                  {selectedNode.data.recovery_action === "fallback" && (
+                    <div>
+                      <Label>Fallback Value</Label>
+                      <Input
+                        placeholder="Default value on error"
+                        value={selectedNode.data.fallback_value || ""}
+                        onChange={(e) => updateNode(selectedNode.id, { fallback_value: e.target.value })}
+                        className="mt-1"
+                      />
+                    </div>
+                  )}
+                </>
               )}
 
               <div>
@@ -772,18 +955,134 @@ export function ProductionWorkflowBuilder() {
               />
             </TabsContent>
 
+            <TabsContent value="advanced" className="space-y-4">
+              {/* Credentials Selector */}
+              {(selectedNode.type === "agentNode" || selectedNode.type === "actionNode") && (
+                <div>
+                  <Label>Credentials</Label>
+                  <Select
+                    value={selectedNode.data.credential_id || ""}
+                    onValueChange={(value) => updateNode(selectedNode.id, { credential_id: value })}
+                  >
+                    <SelectTrigger className="mt-1">
+                      <SelectValue placeholder="Select credential (optional)" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="">None</SelectItem>
+                      {credentials.map((cred) => (
+                        <SelectItem key={cred.id} value={cred.id}>
+                          {cred.name} ({cred.type})
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Use {`{{ $credentials.field_name }}`} to access in expressions
+                  </p>
+                </div>
+              )}
+
+              {/* Retry Policy */}
+              <div className="space-y-3">
+                <Label className="text-base font-semibold">Retry Policy</Label>
+                
+                <div>
+                  <Label>Max Retries</Label>
+                  <Input
+                    type="number"
+                    value={selectedNode.data.retry_policy?.max_retries ?? 3}
+                    onChange={(e) => updateNode(selectedNode.id, {
+                      retry_policy: {
+                        ...selectedNode.data.retry_policy,
+                        max_retries: parseInt(e.target.value) || 0
+                      }
+                    })}
+                    className="mt-1"
+                    min="0"
+                    max="10"
+                  />
+                </div>
+                
+                <div>
+                  <Label>Initial Delay (seconds)</Label>
+                  <Input
+                    type="number"
+                    value={selectedNode.data.retry_policy?.initial_delay ?? 1}
+                    onChange={(e) => updateNode(selectedNode.id, {
+                      retry_policy: {
+                        ...selectedNode.data.retry_policy,
+                        initial_delay: parseFloat(e.target.value) || 1
+                      }
+                    })}
+                    className="mt-1"
+                    min="0.1"
+                    max="60"
+                    step="0.1"
+                  />
+                </div>
+                
+                <div>
+                  <Label>Max Delay (seconds)</Label>
+                  <Input
+                    type="number"
+                    value={selectedNode.data.retry_policy?.max_delay ?? 30}
+                    onChange={(e) => updateNode(selectedNode.id, {
+                      retry_policy: {
+                        ...selectedNode.data.retry_policy,
+                        max_delay: parseFloat(e.target.value) || 30
+                      }
+                    })}
+                    className="mt-1"
+                    min="1"
+                    max="300"
+                  />
+                </div>
+                
+                <div>
+                  <Label>Exponential Base</Label>
+                  <Input
+                    type="number"
+                    value={selectedNode.data.retry_policy?.exponential_base ?? 2}
+                    onChange={(e) => updateNode(selectedNode.id, {
+                      retry_policy: {
+                        ...selectedNode.data.retry_policy,
+                        exponential_base: parseFloat(e.target.value) || 2
+                      }
+                    })}
+                    className="mt-1"
+                    min="1"
+                    max="10"
+                    step="0.1"
+                  />
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Multiplier for exponential backoff (2 = double each retry)
+                  </p>
+                </div>
+              </div>
+            </TabsContent>
+
             <TabsContent value="output" className="space-y-4">
-              {selectedNode.data.lastOutput && (
+              {selectedNode.data.lastOutput ? (
                 <Card className="p-4 bg-muted">
                   <Label className="text-sm font-semibold">Last Output</Label>
-                  <pre className="text-xs mt-2 overflow-auto max-h-60">
+                  <pre className="text-xs mt-2 overflow-auto max-h-60 font-mono">
                     {JSON.stringify(selectedNode.data.lastOutput, null, 2)}
                   </pre>
                 </Card>
+              ) : (
+                <div className="text-center py-8">
+                  <p className="text-sm text-muted-foreground">
+                    Output will appear here after execution
+                  </p>
+                </div>
               )}
-              <p className="text-sm text-muted-foreground">
-                Output will appear here after execution
-              </p>
+              
+              {selectedNode.data.executionTime && (
+                <div className="text-xs text-muted-foreground">
+                  <p>Execution time: {selectedNode.data.executionTime}ms</p>
+                  <p>Status: {selectedNode.data.status || 'pending'}</p>
+                </div>
+              )}
             </TabsContent>
           </Tabs>
 
@@ -805,6 +1104,7 @@ export function ProductionWorkflowBuilder() {
           </div>
         </DialogContent>
       </Dialog>
-    );
-  }
+      )}
+    </div>
+  );
 }

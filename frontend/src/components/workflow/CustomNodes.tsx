@@ -1,5 +1,6 @@
 import { Handle, Position, NodeProps } from "reactflow";
-import { Bot, GitBranch, Repeat, Play, Square, Settings, AlertCircle } from "lucide-react";
+import { Card } from "@/components/ui/card";
+import { Bot, GitBranch, Repeat, Play, Square, Settings, AlertCircle, MessageSquare, Monitor } from "lucide-react";
 
 // Start Node
 export const StartNode = ({ data, selected }: NodeProps) => {
@@ -282,6 +283,105 @@ export const ErrorHandlerNode = ({ data, selected }: NodeProps) => {
   );
 };
 
+// Chat/Manual Trigger Node
+export const ChatNode = ({ data, selected }: NodeProps) => {
+  return (
+    <div
+      className={`px-6 py-4 shadow-lg rounded-2xl border-2 ${
+        selected ? "border-blue-500 shadow-blue-300" : "border-cyan-400"
+      } bg-white dark:bg-gray-800`}
+    >
+      <Handle
+        type="target"
+        position={Position.Top}
+        className="w-3 h-3 !bg-cyan-500"
+      />
+      
+      <div className="flex items-center gap-2 mb-2">
+        <MessageSquare className="w-5 h-5 text-cyan-600 dark:text-cyan-400" />
+        <div className="font-semibold text-cyan-700 dark:text-cyan-300">
+          {data.label || "Chat / Manual"}
+        </div>
+      </div>
+      
+      {data.description && (
+        <div className="text-xs text-gray-500 dark:text-gray-500 line-clamp-2">
+          {data.description}
+        </div>
+      )}
+      
+      <div className="mt-2 text-xs text-cyan-600 dark:text-cyan-400">
+        💬 Interactive Input
+      </div>
+      
+      <Handle
+        type="source"
+        position={Position.Bottom}
+        className="w-3 h-3 !bg-cyan-500"
+      />
+    </div>
+  );
+};
+
+// Display/Output Node
+export const DisplayNode = ({ data, selected }: NodeProps) => {
+  const displayData = data.lastOutput || data.previewData || {};
+  const hasData = Object.keys(displayData).length > 0;
+
+  return (
+    <div
+      className={`px-4 py-4 shadow-lg rounded-lg border-2 ${
+        selected ? "border-blue-500 shadow-blue-300" : "border-emerald-400"
+      } bg-white dark:bg-gray-800 min-w-[300px] max-w-[400px]`}
+    >
+      <Handle
+        type="target"
+        position={Position.Top}
+        className="w-3 h-3 !bg-emerald-500"
+      />
+      
+      <div className="flex items-center gap-2 mb-3 pb-2 border-b border-emerald-200 dark:border-emerald-800">
+        <Monitor className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
+        <div className="font-semibold text-emerald-700 dark:text-emerald-300">
+          {data.label || "Display Output"}
+        </div>
+      </div>
+      
+      {hasData ? (
+        <div className="bg-gray-50 dark:bg-gray-900 rounded-lg p-3 max-h-[300px] overflow-auto">
+          <pre className="text-xs font-mono text-gray-800 dark:text-gray-200 whitespace-pre-wrap break-words">
+            {typeof displayData === 'string' 
+              ? displayData 
+              : JSON.stringify(displayData, null, 2)}
+          </pre>
+        </div>
+      ) : (
+        <div className="bg-gray-50 dark:bg-gray-900 rounded-lg p-4 text-center">
+          <Monitor className="w-8 h-8 text-gray-400 mx-auto mb-2" />
+          <p className="text-sm text-gray-500 dark:text-gray-400">
+            Connect to see output
+          </p>
+          <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">
+            Data will appear here when the workflow runs
+          </p>
+        </div>
+      )}
+      
+      {data.description && (
+        <div className="text-xs text-gray-500 dark:text-gray-500 mt-2 pt-2 border-t">
+          {data.description}
+        </div>
+      )}
+      
+      <Handle
+        type="source"
+        position={Position.Bottom}
+        className="w-3 h-3 !bg-emerald-500"
+      />
+    </div>
+  );
+};
+
 // Export all node types
 export const nodeTypes = {
   startNode: StartNode,
@@ -291,4 +391,6 @@ export const nodeTypes = {
   loopNode: LoopNode,
   actionNode: ActionNode,
   errorHandlerNode: ErrorHandlerNode,
+  chatNode: ChatNode,
+  displayNode: DisplayNode,
 };

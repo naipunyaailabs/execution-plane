@@ -39,6 +39,7 @@ import { toast } from "@/hooks/use-toast";
 import { nodeTypes } from "./CustomNodes";
 import { NodePalette } from "./NodePalette";
 import { useNavigate, useSearchParams } from "react-router-dom";
+import { transformWorkflowForBackend, validateWorkflow } from "./workflowTransformers";
 
 interface Agent {
   agent_id: string;
@@ -223,11 +224,19 @@ export function NoCodeWorkflowBuilder() {
   };
 
   const updateNode = (nodeId: string, updates: Partial<Node["data"]>) => {
-    setNodes((nds) =>
-      nds.map((node) =>
+    setNodes((nds) => {
+      const updatedNodes = nds.map((node) =>
         node.id === nodeId ? { ...node, data: { ...node.data, ...updates } } : node
-      )
-    );
+      );
+      // Update selectedNode to keep dialog in sync
+      if (selectedNode && selectedNode.id === nodeId) {
+        const updatedNode = updatedNodes.find(n => n.id === nodeId);
+        if (updatedNode) {
+          setSelectedNode(updatedNode);
+        }
+      }
+      return updatedNodes;
+    });
   };
 
   const handleNodeClick = (event: React.MouseEvent, node: Node) => {
@@ -250,45 +259,24 @@ export function NoCodeWorkflowBuilder() {
       return;
     }
 
-    if (nodes.length === 0) {
+    // Validate workflow structure
+    const validation = validateWorkflow(nodes, edges);
+    if (!validation.valid) {
       toast({
         title: "Validation Error",
-        description: "Please add at least one node to the workflow",
+        description: validation.error,
         variant: "destructive",
       });
       return;
     }
 
-    // Convert React Flow nodes and edges to workflow definition
-    const steps = nodes.map((node) => ({
-      id: node.id,
-      type: node.type || "agentNode",
-      name: node.data.label || "Unnamed Step",
-      agent_id: node.data.agent_id || "",
-      description: node.data.description || "",
-      position: node.position,
-      data: node.data,
-    }));
-
-    const dependencies: Record<string, string[]> = {};
-    edges.forEach((edge) => {
-      if (!dependencies[edge.target]) {
-        dependencies[edge.target] = [];
-      }
-      dependencies[edge.target].push(edge.source);
-    });
-
-    const workflowDefinition = {
-      steps,
-      dependencies,
-      conditions: {},
-    };
-
-    const workflowData = {
-      name: workflowName,
-      description: workflowDescription,
-      definition: workflowDefinition,
-    };
+    // Transform workflow using proper transformation logic
+    const workflowData = transformWorkflowForBackend(
+      nodes,
+      edges,
+      workflowName,
+      workflowDescription
+    );
 
     try {
       const url = isEditMode

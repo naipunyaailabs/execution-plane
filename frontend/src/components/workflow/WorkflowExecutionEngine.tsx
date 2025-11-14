@@ -144,6 +144,10 @@ export class WorkflowExecutionEngine {
           output = await this.executeErrorHandlerNode(node, inputData);
           break;
 
+        case "displayNode":
+          output = await this.executeDisplayNode(node, inputData);
+          break;
+
         case "endNode":
           output = { finalResult: inputData, timestamp: new Date().toISOString() };
           break;
@@ -197,25 +201,49 @@ export class WorkflowExecutionEngine {
   }
 
   private async executeAgentNode(node: Node, inputData: any): Promise<any> {
-    const { agent_id, description } = node.data;
+    const { agent_id, description, parameters } = node.data;
 
     if (!agent_id) {
       throw new Error(`Agent not configured for node ${node.id}`);
     }
 
-    // Call backend API to execute agent
-    const response = await fetch("http://localhost:8000/api/v1/agents/execute", {
+    // Prepare agent input by evaluating parameters with expressions
+    let agentInput = inputData;
+    
+    if (parameters && Object.keys(parameters).length > 0) {
+      // If node has parameters, map them from context
+      agentInput = {};
+      for (const [key, expression] of Object.entries(parameters)) {
+        if (typeof expression === 'string') {
+          agentInput[key] = this.evaluateExpression(expression as string, {
+            ...this.context.variables,
+            ...inputData
+          });
+        } else {
+          agentInput[key] = expression;
+        }
+      }
+    }
+
+    // Convert input to string if it's an object
+    let inputText = agentInput;
+    if (typeof agentInput === 'object') {
+      // Check for common input fields
+      inputText = agentInput.query || agentInput.input || agentInput.text || JSON.stringify(agentInput);
+    }
+
+    // Call backend API to execute agent - FIXED: agent_id in URL path
+    const response = await fetch(`http://localhost:8000/api/v1/agents/${agent_id}/execute`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        agent_id,
-        input: inputData,
-        context: this.context.variables,
+        input: inputText
       }),
     });
 
     if (!response.ok) {
-      throw new Error(`Agent execution failed: ${response.statusText}`);
+      const errorText = await response.text();
+      throw new Error(`Agent execution failed: ${response.statusText} - ${errorText}`);
     }
 
     const result = await response.json();
@@ -284,30 +312,24 @@ export class WorkflowExecutionEngine {
 
   private async executeErrorHandlerNode(node: Node, inputData: any): Promise<any> {
     const { error_type, description } = node.data;
+    console.error("Error handled:", inputData);
+    return inputData;
+  }
 
-    // Log error
-    console.error(`Error handled by ${node.id}:`, inputData.error);
-
-    // Recovery logic based on error type
-    switch (error_type) {
-      case "timeout":
-        // Retry logic
-        return { recovered: true, retryAttempt: 1 };
-      case "validation":
-        // Validation fix
-        return { recovered: true, validationFixed: true };
-      default:
-        return { recovered: false, error: inputData.error };
-    }
+  private async executeDisplayNode(node: Node, inputData: any): Promise<any> {
+    // Display node passes data through and marks it for visualization
+    return {
+      displayed: true,
+      data: inputData,
+      timestamp: new Date().toISOString()
+    };
   }
 
   private async executeApiCall(node: Node, inputData: any): Promise<any> {
-    // Implement API call logic
     return { apiCallResult: "success", data: inputData };
   }
 
   private executeDataTransform(node: Node, inputData: any): any {
-    // Implement data transformation
     return { transformed: true, data: inputData };
   }
 
@@ -389,7 +411,7 @@ export class WorkflowExecutionEngine {
       .filter((n): n is Node => n !== undefined && n.type === "errorHandlerNode");
   }
 
-  private evaluateExpression(expression: string, data: any): boolean {
+  private evaluateExpression(expression: string, data: any): any {
     try {
       // Safe expression evaluation
       const context = {
@@ -399,11 +421,18 @@ export class WorkflowExecutionEngine {
         ...this.context.variables,
       };
 
-      // Use safe evaluator
+      // Use safe evaluator to handle {{ }} template expressions
+      // evaluateTemplate returns the actual value for {{ $json.field }}
+      if (expression.includes('{{') && expression.includes('}}')) {
+        return safeEvaluator.evaluateTemplate(expression, context);
+      }
+      
+      // Otherwise evaluate as condition (for boolean expressions)
       return safeEvaluator.evaluateCondition(expression, context);
     } catch (error) {
       console.error("Expression evaluation error:", error);
-      return false;
+      // Return the expression as-is if evaluation fails
+      return expression;
     }
   }
 

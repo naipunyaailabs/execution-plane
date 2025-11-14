@@ -1,5 +1,5 @@
 import { Card } from "@/components/ui/card";
-import { Bot, GitBranch, Repeat, Play, Square, Settings, AlertCircle } from "lucide-react";
+import { Bot, GitBranch, Repeat, Play, Square, Settings, AlertCircle, MessageSquare, Monitor } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 
 interface NodeTypeConfig {
@@ -68,6 +68,22 @@ const nodeTypeConfigs: NodeTypeConfig[] = [
     color: "text-orange-600",
     bgColor: "bg-orange-50 hover:bg-orange-100 border-orange-300",
   },
+  {
+    type: "chatNode",
+    label: "Chat / Manual",
+    icon: MessageSquare,
+    description: "Manual trigger with chat interface",
+    color: "text-cyan-600",
+    bgColor: "bg-cyan-50 hover:bg-cyan-100 border-cyan-300",
+  },
+  {
+    type: "displayNode",
+    label: "Display Output",
+    icon: Monitor,
+    description: "Display and preview data beautifully",
+    color: "text-emerald-600",
+    bgColor: "bg-emerald-50 hover:bg-emerald-100 border-emerald-300",
+  },
 ];
 
 export function NodePalette() {
@@ -77,16 +93,16 @@ export function NodePalette() {
   };
 
   return (
-    <Card className="w-64 h-full flex flex-col">
-      <div className="p-4 border-b">
+    <Card className="w-64 h-full flex flex-col overflow-hidden">
+      <div className="p-4 border-b flex-shrink-0">
         <h3 className="font-semibold text-lg">Node Palette</h3>
         <p className="text-xs text-muted-foreground mt-1">
           Drag and drop nodes to the canvas
         </p>
       </div>
       
-      <ScrollArea className="flex-1 p-3">
-        <div className="space-y-2">
+      <ScrollArea className="flex-1 overflow-auto">
+        <div className="space-y-2 p-3">
           {nodeTypeConfigs.map((config) => {
             const Icon = config.icon;
             return (

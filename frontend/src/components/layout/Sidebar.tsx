@@ -21,11 +21,18 @@ const navigation = [
   { name: "Monitoring", href: "/monitoring", icon: Activity },
 ];
 
-export function Sidebar() {
+interface SidebarProps {
+  isCollapsed?: boolean;
+}
+
+export function Sidebar({ isCollapsed = false }: SidebarProps) {
   const location = useLocation();
 
   return (
-    <aside className="fixed left-0 top-0 h-screen w-64 bg-[hsl(var(--sidebar-background))] border-r border-[hsl(var(--sidebar-border))] flex flex-col z-40">
+    <aside className={cn(
+      "fixed left-0 top-0 h-screen bg-[hsl(var(--sidebar-background))] border-r border-[hsl(var(--sidebar-border))] flex flex-col z-40 transition-all duration-300",
+      isCollapsed ? "-translate-x-full w-64" : "translate-x-0 w-64"
+    )}>
       {/* Logo Section */}
       <div className="flex items-center gap-3 px-6 py-6 border-b border-[hsl(var(--sidebar-border))]">
         <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-primary to-primary/70 flex items-center justify-center shadow-lg">

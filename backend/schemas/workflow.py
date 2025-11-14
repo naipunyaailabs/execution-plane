@@ -23,6 +23,7 @@ class WorkflowDefinition(BaseModel):
     steps: List[WorkflowStep]
     dependencies: Optional[Dict[str, List[str]]] = None  # Step dependencies
     conditions: Optional[Dict[str, Dict[str, Any]]] = None  # Conditional execution rules
+    visualization: Optional[Dict[str, Any]] = None  # React Flow visual data (nodes, edges, positions)
 
 
 class WorkflowVisualizationData(BaseModel):

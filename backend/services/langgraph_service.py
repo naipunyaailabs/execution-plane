@@ -19,6 +19,7 @@ except ImportError:
 
 from services.agent_service import AgentService
 from services.langfuse_integration import LangfuseIntegration
+from services.expression_evaluator import evaluate_expression, evaluate_condition
 from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
@@ -288,8 +289,19 @@ class LangGraphWorkflowService:
         """Execute condition node - evaluate condition"""
         condition = step.get("condition", {})
         
-        # Evaluate condition against state
-        result = self._evaluate_condition(condition, state)
+        # Get expression from condition config
+        if isinstance(condition, dict):
+            expression = condition.get("expression", "")
+        else:
+            expression = str(condition)
+        
+        # Evaluate condition against state using expression evaluator
+        try:
+            result = evaluate_condition(expression, state)
+            logger.info(f"Condition '{expression}' evaluated to: {result}")
+        except Exception as e:
+            logger.error(f"Condition evaluation failed: {str(e)}")
+            result = False
         
         return {
             "output": result,
@@ -413,16 +425,17 @@ class LangGraphWorkflowService:
         
         return current
     
-    def _interpolate_variables(self, text: str, state: WorkflowState) -> str:
-        """Interpolate variables in text using {{ }} syntax"""
-        import re
-        
-        def replace_var(match):
-            var_path = match.group(1).strip()
-            value = self._get_from_state(var_path, state)
-            return str(value) if value is not None else ""
-        
-        return re.sub(r'\{\{\s*(.+?)\s*\}\}', replace_var, text)
+    def _interpolate_variables(self, expression: str, state: WorkflowState) -> str:
+        """
+        Interpolate variables in expressions.
+        Uses the expression evaluator for consistent handling.
+        """
+        try:
+            result = evaluate_expression(expression, state)
+            return str(result) if result is not None else expression
+        except Exception as e:
+            logger.error(f"Variable interpolation failed for '{expression}': {str(e)}")
+            return expression
     
     def _evaluate_condition(self, condition: Dict[str, Any], state: WorkflowState) -> bool:
         """Evaluate a condition against state"""
